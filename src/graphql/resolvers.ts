@@ -87,6 +87,19 @@ export const resolvers = {
       if (!context.user) throw new Error('Unauthorized: Missing or invalid token');
       return Array.from(db.notifications.values()).filter((n) => n.userId === context.user!.id);
     },
+    adminDeposits: () => {
+      return Array.from(db.depositTransactions.values()).map((dep) => {
+        const user = db.users.get(dep.userId);
+        return {
+          ...dep,
+          userName: user ? user.name : dep.userName || 'Investor',
+          userEmail: user ? user.email : dep.userEmail || '',
+        };
+      });
+    },
+    adminWithdrawals: () => {
+      return Array.from(db.withdrawalTransactions.values());
+    },
   },
 
   Mutation: {
@@ -145,7 +158,23 @@ export const resolvers = {
       return user;
     },
 
-    createDeposit: (_: any, { method, amount, currency, transactionHash }: { method: string; amount: number; currency?: string; transactionHash?: string }, context: { user?: User }) => {
+    createDeposit: (
+      _: any,
+      {
+        method,
+        amount,
+        currency,
+        transactionHash,
+        receiptImage,
+      }: {
+        method: string;
+        amount: number;
+        currency?: string;
+        transactionHash?: string;
+        receiptImage?: string;
+      },
+      context: { user?: User }
+    ) => {
       if (!context.user) throw new Error('Unauthorized: Missing or invalid token');
       const user = context.user;
       const selectedMethod = db.depositMethods.find((m) => m.id.toLowerCase() === method.toLowerCase());
@@ -156,11 +185,14 @@ export const resolvers = {
       const depositTx: DepositTransaction = {
         id: txId,
         userId: user.id,
+        userName: user.name,
+        userEmail: user.email,
         type: 'deposit',
         amount: Number(amount),
         method: methodName,
         currency: currency || 'USD',
         transactionHash: transactionHash || `0x${Math.random().toString(16).substring(2, 30)}`,
+        receiptImage: receiptImage || '',
         status: 'pending',
         createdAt,
       };
@@ -172,6 +204,7 @@ export const resolvers = {
         amount: Number(amount),
         status: 'pending',
         plan: 'Direct Inflow',
+        receiptImage: receiptImage || '',
         date: createdAt,
       });
       return depositTx;

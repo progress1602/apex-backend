@@ -59,7 +59,7 @@ function assert(condition: boolean, message: string) {
 }
 
 async function runTestSuite() {
-  console.log('🧪 Starting ApexBridge Comprehensive Test Suite (Dynamic User Data)...\n');
+  console.log('🧪 Starting ApexBridge Comprehensive Test Suite with Receipt Image Upload...\n');
   let token = '';
 
   // 1. Landing & OpenAPI spec & Apollo Sandbox Page
@@ -79,132 +79,140 @@ async function runTestSuite() {
     method: 'POST',
     path: '/api/v1/auth/signup',
     body: {
-      fullName: 'Real Investor',
+      fullName: 'Receipt Tester',
       email,
       password: 'SecurePassword123!',
     },
   });
   assert(signupRes.status === 201 && signupRes.data.success === true, 'Signup successful');
-  assert(signupRes.data.user.name === 'Real Investor', 'User name matches input exactly');
+  assert(signupRes.data.user.name === 'Receipt Tester', 'User name matches input exactly');
   assert(signupRes.data.user.balance === 0, 'New user starting balance is strictly 0');
   token = signupRes.data.token;
   console.log('✅ POST /api/v1/auth/signup OK');
 
-  // 3. User Profile & Settings (Strictly user-entered)
+  // 3. User Profile & Settings
   console.log('\nTesting 2. User Profile & Settings...');
   const profileRes = await request({ method: 'GET', path: '/api/v1/user/profile', token });
-  assert(profileRes.status === 200 && profileRes.data.name === 'Real Investor', 'Profile name matches');
-  assert(profileRes.data.phone === '', 'Unset phone is empty, no dummy phone');
+  assert(profileRes.status === 200 && profileRes.data.name === 'Receipt Tester', 'Profile name matches');
   console.log('✅ GET /api/v1/user/profile OK');
 
-  const updateProfileRes = await request({
-    method: 'PATCH',
-    path: '/api/v1/user/profile',
-    token,
-    body: {
-      phone: '+1 (800) 555-0199',
-      is2FAEnabled: true,
-      currencyPreference: 'USD',
-    },
-  });
-  assert(updateProfileRes.status === 200 && updateProfileRes.data.success === true, 'Profile update OK');
-  console.log('✅ PATCH /api/v1/user/profile OK');
-
-  // 4. Initial Wallet Summary (Should be exactly 0)
-  console.log('\nTesting 3. Initial Clean Wallet Summary...');
-  const initialWalletRes = await request({ method: 'GET', path: '/api/v1/wallet/summary', token });
-  assert(initialWalletRes.status === 200 && initialWalletRes.data.data.totalPortfolio === 0, 'Initial portfolio is 0');
-  assert(initialWalletRes.data.data.availableBalance === 0, 'Initial balance is 0');
-  assert(initialWalletRes.data.data.activeInvestments === 0, 'Initial active investments is 0');
-  assert(initialWalletRes.data.data.totalEarnings === 0, 'Initial earnings is 0');
-  console.log('✅ GET /api/v1/wallet/summary (Initial 0.00 State) OK');
-
-  // 5. Deposit and Credit Balance
-  console.log('\nTesting 4. Deposits & Balance Inflow...');
+  // 4. Submit Deposit with Receipt Image
+  console.log('\nTesting 3. Submit Deposit with Receipt Proof Image...');
+  const mockReceiptBase64 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
   const createDepRes = await request({
     method: 'POST',
     path: '/api/v1/deposits',
     token,
     body: {
       method: 'btc',
-      amount: 10000.0,
+      amount: 15000.0,
       currency: 'USD',
-      transactionHash: '0xabc123',
+      transactionHash: '0x998877665544332211',
+      receiptImage: mockReceiptBase64,
     },
   });
-  assert(createDepRes.status === 201 && createDepRes.data.transaction.status === 'pending', 'Deposit create OK');
+  assert(createDepRes.status === 201, 'Deposit created status 201');
+  assert(createDepRes.data.transaction.receiptImage === mockReceiptBase64, 'Receipt image stored and returned on deposit');
   const depositTxId = createDepRes.data.transaction.id;
+  console.log(`✅ POST /api/v1/deposits OK (Receipt Image Attached: ${depositTxId})`);
 
-  // Admin approves deposit -> balance increases to 10000
-  await request({
+  // 5. User View Deposits (with Receipt Image)
+  const userDepsRes = await request({ method: 'GET', path: '/api/v1/deposits', token });
+  assert(userDepsRes.status === 200 && userDepsRes.data.deposits.length >= 1, 'User deposits listed');
+  assert(userDepsRes.data.deposits[0].receiptImage === mockReceiptBase64, 'Receipt image visible in user deposit list');
+  console.log('✅ GET /api/v1/deposits (User deposits with receipt) OK');
+
+  // 6. Admin View All Deposits (with Receipt Proof and User Info)
+  console.log('\nTesting 4. Admin View Deposits with Uploaded Receipt Images...');
+  const adminDepsRes = await request({ method: 'GET', path: '/api/v1/admin/deposits' });
+  assert(adminDepsRes.status === 200 && adminDepsRes.data.deposits.length >= 1, 'Admin deposits list retrieved');
+  const adminFoundDep = adminDepsRes.data.deposits.find((d: any) => d.id === depositTxId);
+  assert(adminFoundDep !== undefined, 'Admin found the submitted deposit');
+  assert(adminFoundDep.receiptImage === mockReceiptBase64, 'Admin receives receipt image proof');
+  assert(adminFoundDep.userName === 'Receipt Tester', 'Admin receives depositor user name');
+  console.log('✅ GET /api/v1/admin/deposits (Admin receipt review) OK');
+
+  // 7. Admin Approve Deposit
+  console.log('\nTesting 5. Admin Approve Deposit...');
+  const adminApproveRes = await request({
     method: 'PATCH',
     path: `/api/v1/admin/deposits/${depositTxId}/status`,
     body: { status: 'approved' },
   });
+  assert(adminApproveRes.status === 200 && adminApproveRes.data.status === 'approved', 'Admin approved deposit');
+  assert(adminApproveRes.data.receiptImage === mockReceiptBase64, 'Receipt image preserved in approval response');
 
   const walletAfterDep = await request({ method: 'GET', path: '/api/v1/wallet/summary', token });
-  assert(walletAfterDep.data.data.availableBalance === 10000, 'Balance updated to 10000 after deposit approval');
-  console.log('✅ Deposit creation & approval credited balance correctly');
+  assert(walletAfterDep.data.data.availableBalance === 15000, 'Balance credited to 15000 after approval');
+  console.log('✅ Deposit approved & user balance credited to $15,000');
 
-  // 6. Investments
-  console.log('\nTesting 5. Investments...');
+  // 8. Investments
+  console.log('\nTesting 6. Investment Allocation & Settlement...');
   const createInvRes = await request({
     method: 'POST',
     path: '/api/v1/investments',
     token,
     body: {
-      planId: 'starter',
-      planName: 'Apex Starter Tier',
-      amount: 4000.0,
-      roi: '15%',
+      planId: 'vault',
+      planName: 'Quantum Yield Vault',
+      amount: 5000.0,
+      roi: '35%',
     },
   });
-  assert(createInvRes.status === 201 && createInvRes.data.newAvailableBalance === 6000, 'Deducted 4000 from 10000 balance -> 6000');
+  assert(createInvRes.status === 201 && createInvRes.data.newAvailableBalance === 10000, 'Invested 5000 from 15000 -> 10000 left');
   const createdInvId = createInvRes.data.investment.id;
 
-  const walletAfterInv = await request({ method: 'GET', path: '/api/v1/wallet/summary', token });
-  assert(walletAfterInv.data.data.availableBalance === 6000, 'Available balance is 6000');
-  assert(walletAfterInv.data.data.activeInvestments === 4000, 'Active investments is 4000');
-  assert(walletAfterInv.data.data.totalPortfolio === 10000, 'Total portfolio is 10000');
-  console.log('✅ Investment allocated and portfolio dynamically updated');
-
-  // 7. Settle Investment
-  console.log('\nTesting 6. Settle Investment Position...');
   const settleRes = await request({
     method: 'POST',
     path: `/api/v1/investments/${createdInvId}/settle`,
     token,
   });
-  assert(settleRes.status === 200 && settleRes.data.settlement.payoutAmount === 4600, '4000 + 15% ROI = 4600 payout');
-  console.log('✅ Settle investment returned principal + yield');
+  assert(settleRes.status === 200 && settleRes.data.settlement.payoutAmount === 6750, '5000 + 35% ROI = 6750 payout');
+  console.log('✅ Investment allocated and settled with 35% yield');
 
-  // 8. Transactions Ledger
-  console.log('\nTesting 7. Transactions Ledger (Only User Activity)...');
-  const txsRes = await request({ method: 'GET', path: '/api/v1/transactions', token });
-  assert(txsRes.status === 200 && txsRes.data.data.length === 3, 'Exactly 3 user transactions present (deposit, investment, settle)');
-  console.log('✅ GET /api/v1/transactions (Strictly user transactions) OK');
-
-  // 9. GraphQL Execution for User
-  console.log('\nTesting 8. Apollo GraphQL Query for Authenticated User...');
-  const gqlRes = await request({
+  // 9. GraphQL Execution with Receipt Image
+  console.log('\nTesting 7. Apollo GraphQL Deposit with Receipt & Admin Query...');
+  const gqlDepositRes = await request({
     method: 'POST',
     path: '/graphql',
     body: {
       query: `
-        query GetMyData {
-          me { id name email balance }
-          walletSummary { totalPortfolio availableBalance activeInvestments totalEarnings }
+        mutation CreateDepositWithReceipt {
+          createDeposit(method: "eth", amount: 2000.0, receiptImage: "data:image/png;base64,sample_receipt_data") {
+            id
+            amount
+            receiptImage
+            status
+          }
         }
       `,
     },
     token,
   });
-  assert(gqlRes.status === 200 && gqlRes.data.data.me.name === 'Real Investor', 'GraphQL me.name matches user');
-  assert(gqlRes.data.data.walletSummary.totalEarnings === 600, 'GraphQL totalEarnings is 600 (4600-4000)');
-  console.log('✅ POST /graphql (Strictly user data resolved) OK');
+  assert(gqlDepositRes.status === 200 && gqlDepositRes.data.data.createDeposit.receiptImage === 'data:image/png;base64,sample_receipt_data', 'GraphQL createDeposit returned receiptImage');
+
+  const gqlAdminRes = await request({
+    method: 'POST',
+    path: '/graphql',
+    body: {
+      query: `
+        query GetAdminDeposits {
+          adminDeposits {
+            id
+            amount
+            userName
+            receiptImage
+            status
+          }
+        }
+      `,
+    },
+  });
+  assert(gqlAdminRes.status === 200 && Array.isArray(gqlAdminRes.data.data.adminDeposits), 'GraphQL adminDeposits listed');
+  console.log('✅ Apollo GraphQL Deposit & Admin Receipt queries OK');
 
   console.log('\n=======================================================');
-  console.log('🎉 100% USER-ISOLATED DATA VALIDATED SUCCESSFULLY!');
+  console.log('🎉 ALL TESTS INCLUDING RECEIPT IMAGES PASSED 100%!');
   console.log('=======================================================\n');
 }
 

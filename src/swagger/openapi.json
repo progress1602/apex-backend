@@ -3,7 +3,7 @@
   "info": {
     "title": "ApexBridge REST API",
     "version": "1.0.0",
-    "description": "High-yield crypto and investment portal REST API specification. Supports complete authentication, live wallet tracking, deposit/withdrawal lifecycles, and yield management.",
+    "description": "High-yield crypto and investment portal REST API specification. Supports complete authentication, live wallet tracking, deposit receipt image submission, withdrawal lifecycles, and yield management.",
     "contact": {
       "name": "ApexBridge Engineering",
       "email": "support@apexbridge.io",
@@ -34,14 +34,28 @@
         "type": "object",
         "properties": {
           "id": { "type": "string", "example": "usr_8829104" },
-          "name": { "type": "string", "example": "Alexander Vance" },
-          "email": { "type": "string", "example": "alexander@apexbridge.com" },
-          "avatar": { "type": "string", "example": "https://images.unsplash.com/photo-1534528741775-53994a69daeb" },
+          "name": { "type": "string", "example": "Jane Doe" },
+          "email": { "type": "string", "example": "jane@example.com" },
+          "avatar": { "type": "string", "example": "" },
           "role": { "type": "string", "example": "investor" },
-          "tier": { "type": "string", "example": "Tier 2 - Verified" },
-          "balance": { "type": "number", "example": 48250.00 },
-          "is2FAEnabled": { "type": "boolean", "example": true },
-          "createdAt": { "type": "string", "example": "2026-08-30T10:00:00Z" }
+          "tier": { "type": "string", "example": "Tier 1 - Standard" },
+          "balance": { "type": "number", "example": 0.00 },
+          "is2FAEnabled": { "type": "boolean", "example": false },
+          "createdAt": { "type": "string", "example": "2026-08-31T10:00:00Z" }
+        }
+      },
+      "DepositTransaction": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "example": "tx_dep_99401" },
+          "type": { "type": "string", "example": "deposit" },
+          "amount": { "type": "number", "example": 2500.00 },
+          "method": { "type": "string", "example": "Bitcoin (BTC)" },
+          "currency": { "type": "string", "example": "USD" },
+          "transactionHash": { "type": "string", "example": "0x9f83a2182049124182b89410482012" },
+          "receiptImage": { "type": "string", "example": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA..." },
+          "status": { "type": "string", "example": "pending" },
+          "createdAt": { "type": "string", "example": "2026-08-31T21:30:00Z" }
         }
       }
     }
@@ -59,8 +73,8 @@
                 "type": "object",
                 "required": ["fullName", "email", "password"],
                 "properties": {
-                  "fullName": { "type": "string", "example": "Alexander Vance" },
-                  "email": { "type": "string", "example": "alexander@apexbridge.com" },
+                  "fullName": { "type": "string", "example": "Jane Doe" },
+                  "email": { "type": "string", "example": "jane@example.com" },
                   "password": { "type": "string", "example": "SecurePassword123!" }
                 }
               }
@@ -88,7 +102,7 @@
     },
     "/api/v1/auth/login": {
       "post": {
-        "summary": "Authenticate existing credentials and start session",
+        "summary": "Authenticate credentials and start session",
         "tags": ["1. Authentication & Sessions"],
         "requestBody": {
           "required": true,
@@ -98,7 +112,7 @@
                 "type": "object",
                 "required": ["email", "password"],
                 "properties": {
-                  "email": { "type": "string", "example": "alexander@apexbridge.com" },
+                  "email": { "type": "string", "example": "jane@example.com" },
                   "password": { "type": "string", "example": "SecurePassword123!" }
                 }
               }
@@ -149,7 +163,7 @@
     },
     "/api/v1/user/profile": {
       "get": {
-        "summary": "Get user settings, security status, and KYC verification tier",
+        "summary": "Get user settings and profile",
         "tags": ["2. User Profile & Settings"],
         "security": [{ "BearerAuth": [] }],
         "responses": {
@@ -161,18 +175,18 @@
                   "type": "object",
                   "properties": {
                     "id": { "type": "string", "example": "usr_8829104" },
-                    "name": { "type": "string", "example": "Alexander Vance" },
-                    "email": { "type": "string", "example": "alexander@apexbridge.com" },
+                    "name": { "type": "string", "example": "Jane Doe" },
+                    "email": { "type": "string", "example": "jane@example.com" },
                     "phone": { "type": "string", "example": "+1 (555) 234-5678" },
-                    "tier": { "type": "string", "example": "Tier 2 - Verified" },
-                    "is2FAEnabled": { "type": "boolean", "example": true },
+                    "tier": { "type": "string", "example": "Tier 1 - Standard" },
+                    "is2FAEnabled": { "type": "boolean", "example": false },
                     "currencyPreference": { "type": "string", "example": "USD" },
                     "notifications": {
                       "type": "object",
                       "properties": {
                         "email": { "type": "boolean", "example": true },
                         "sms": { "type": "boolean", "example": false },
-                        "yieldAlerts": { "type": "boolean", "example": true }
+                        "yieldAlerts": { "type": "boolean", "example": false }
                       }
                     }
                   }
@@ -193,7 +207,7 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "name": { "type": "string", "example": "Alexander Vance" },
+                  "name": { "type": "string", "example": "Jane Doe" },
                   "phone": { "type": "string", "example": "+1 (555) 234-5678" },
                   "is2FAEnabled": { "type": "boolean", "example": true },
                   "currencyPreference": { "type": "string", "example": "USD" }
@@ -222,7 +236,7 @@
     },
     "/api/v1/wallet/summary": {
       "get": {
-        "summary": "Fetch total portfolio, balances, earnings, and 24h percentage",
+        "summary": "Fetch total portfolio, balances, and earnings",
         "tags": ["3. Dashboard, Wallet & Market Metrics"],
         "security": [{ "BearerAuth": [] }],
         "responses": {
@@ -237,11 +251,11 @@
                     "data": {
                       "type": "object",
                       "properties": {
-                        "totalPortfolio": { "type": "number", "example": 48250.00 },
-                        "availableBalance": { "type": "number", "example": 12450.00 },
-                        "activeInvestments": { "type": "number", "example": 35800.00 },
-                        "totalEarnings": { "type": "number", "example": 8420.50 },
-                        "growth24h": { "type": "number", "example": 4.82 },
+                        "totalPortfolio": { "type": "number", "example": 10000.00 },
+                        "availableBalance": { "type": "number", "example": 6000.00 },
+                        "activeInvestments": { "type": "number", "example": 4000.00 },
+                        "totalEarnings": { "type": "number", "example": 600.00 },
+                        "growth24h": { "type": "number", "example": 0.00 },
                         "currency": { "type": "string", "example": "USD" }
                       }
                     }
@@ -283,8 +297,8 @@
                       "items": {
                         "type": "object",
                         "properties": {
-                          "timestamp": { "type": "string", "example": "2026-08-30T00:00:00Z" },
-                          "value": { "type": "number", "example": 48250.00 }
+                          "timestamp": { "type": "string", "example": "2026-08-31T00:00:00Z" },
+                          "value": { "type": "number", "example": 10000.00 }
                         }
                       }
                     }
@@ -298,7 +312,7 @@
     },
     "/api/v1/market/tickers": {
       "get": {
-        "summary": "Real-time price and ticker data for header/dashboard cards",
+        "summary": "Real-time price and ticker data",
         "tags": ["3. Dashboard, Wallet & Market Metrics"],
         "responses": {
           "200": {
@@ -362,8 +376,32 @@
       }
     },
     "/api/v1/deposits": {
+      "get": {
+        "summary": "Get user's deposit history and receipt proofs",
+        "tags": ["4. Deposits"],
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "List of user deposits",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "deposits": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/DepositTransaction" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
       "post": {
-        "summary": "Submit a deposit notification or transaction hash for verification",
+        "summary": "Submit a deposit notification with transaction hash and receipt image",
         "tags": ["4. Deposits"],
         "security": [{ "BearerAuth": [] }],
         "requestBody": {
@@ -377,7 +415,8 @@
                   "method": { "type": "string", "example": "btc" },
                   "amount": { "type": "number", "example": 2500.00 },
                   "currency": { "type": "string", "example": "USD" },
-                  "transactionHash": { "type": "string", "example": "0x9f83a2182049124182b89410482012" }
+                  "transactionHash": { "type": "string", "example": "0x9f83a2182049124182b89410482012" },
+                  "receiptImage": { "type": "string", "description": "Base64 image string or URL of the deposit receipt proof", "example": "data:image/png;base64,iVBORw0KGgo..." }
                 }
               }
             }
@@ -392,17 +431,7 @@
                   "type": "object",
                   "properties": {
                     "success": { "type": "boolean", "example": true },
-                    "transaction": {
-                      "type": "object",
-                      "properties": {
-                        "id": { "type": "string", "example": "tx_dep_99401" },
-                        "type": { "type": "string", "example": "deposit" },
-                        "amount": { "type": "number", "example": 2500.00 },
-                        "method": { "type": "string", "example": "Bitcoin (BTC)" },
-                        "status": { "type": "string", "example": "pending" },
-                        "createdAt": { "type": "string", "example": "2026-08-30T21:30:00Z" }
-                      }
-                    }
+                    "transaction": { "$ref": "#/components/schemas/DepositTransaction" }
                   }
                 }
               }
@@ -536,7 +565,7 @@
     },
     "/api/v1/investments/{id}/settle": {
       "post": {
-        "summary": "Withdraw/settle a 100% completed investment into main wallet balance",
+        "summary": "Withdraw/settle a completed investment into main wallet balance",
         "tags": ["5. Investments & Yield Matrix"],
         "security": [{ "BearerAuth": [] }],
         "parameters": [
@@ -674,6 +703,7 @@
                           "amount": { "type": "number", "example": 2500.00 },
                           "status": { "type": "string", "example": "approved" },
                           "plan": { "type": "string", "example": "Direct Inflow" },
+                          "receiptImage": { "type": "string", "example": "data:image/png;base64,..." },
                           "date": { "type": "string", "example": "2026-08-30T14:20:00Z" }
                         }
                       }
@@ -783,6 +813,32 @@
         }
       }
     },
+    "/api/v1/admin/deposits": {
+      "get": {
+        "summary": "Admin view all user deposit submissions with uploaded receipt image proofs",
+        "tags": ["9. Administrative & Back-Office Operations"],
+        "responses": {
+          "200": {
+            "description": "List of all user deposits with receipt proofs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "total": { "type": "integer", "example": 5 },
+                    "deposits": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/DepositTransaction" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/admin/deposits/{id}/status": {
       "patch": {
         "summary": "Admin approval or rejection of user deposits",
@@ -819,7 +875,9 @@
                   "properties": {
                     "success": { "type": "boolean", "example": true },
                     "transactionId": { "type": "string", "example": "tx_dep_99401" },
-                    "status": { "type": "string", "example": "approved" }
+                    "status": { "type": "string", "example": "approved" },
+                    "receiptImage": { "type": "string", "example": "data:image/png;base64,..." },
+                    "deposit": { "$ref": "#/components/schemas/DepositTransaction" }
                   }
                 }
               }

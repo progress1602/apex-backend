@@ -57,9 +57,15 @@ export const typeDefs = `#graphql
 
   type DepositTransaction {
     id: ID
+    userId: String
+    userName: String
+    userEmail: String
     type: String
     amount: Float
     method: String
+    currency: String
+    transactionHash: String
+    receiptImage: String
     status: String
     createdAt: String
   }
@@ -111,6 +117,7 @@ export const typeDefs = `#graphql
     amount: Float
     status: String
     plan: String
+    receiptImage: String
     date: String
   }
 
@@ -134,13 +141,15 @@ export const typeDefs = `#graphql
     userInvestments: [UserInvestment]
     transactions(type: String, status: String, page: Int, limit: Int): [TransactionItem]
     notifications: [NotificationItem]
+    adminDeposits: [DepositTransaction]
+    adminWithdrawals: [WithdrawalResult]
   }
 
   type Mutation {
     signup(fullName: String, email: String!, password: String!): AuthPayload
     login(email: String!, password: String!): AuthPayload
     updateProfile(name: String, phone: String, is2FAEnabled: Boolean, currencyPreference: String): User
-    createDeposit(method: String!, amount: Float!, currency: String, transactionHash: String): DepositTransaction
+    createDeposit(method: String!, amount: Float!, currency: String, transactionHash: String, receiptImage: String): DepositTransaction
     createInvestment(planId: String, planName: String, amount: Float!, roi: String): UserInvestment
     settleInvestment(id: ID!): SettlementResult
     createWithdrawal(amount: Float!, method: String, destinationAddress: String!, twoFactorCode: String): WithdrawalResult

@@ -50,11 +50,14 @@ export interface DepositMethod {
 export interface DepositTransaction {
   id: string;
   userId: string;
+  userName?: string;
+  userEmail?: string;
   type: 'deposit';
   amount: number;
   method: string;
   currency: string;
   transactionHash?: string;
+  receiptImage?: string;
   status: 'pending' | 'approved' | 'rejected';
   createdAt: string;
 }
@@ -87,6 +90,8 @@ export interface UserInvestment {
 export interface WithdrawalTransaction {
   id: string;
   userId: string;
+  userName?: string;
+  userEmail?: string;
   type: 'withdrawal';
   amount: number;
   fee: number;
@@ -105,6 +110,7 @@ export interface TransactionLedgerItem {
   amount: number;
   status: 'pending' | 'approved' | 'completed' | 'rejected' | 'processed';
   plan: string;
+  receiptImage?: string;
   date: string;
 }
 
