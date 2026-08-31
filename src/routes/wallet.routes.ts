@@ -10,25 +10,30 @@ router.get('/wallet/summary', authenticate, (req: AuthenticatedRequest, res: Res
 
   // Calculate user active investments
   let activeInvestmentsSum = 0;
+  let totalEarnings = 0;
+
   for (const inv of db.userInvestments.values()) {
-    if (inv.userId === user.id && inv.status === 'active') {
-      activeInvestmentsSum += inv.amount;
+    if (inv.userId === user.id) {
+      if (inv.status === 'active') {
+        activeInvestmentsSum += inv.amount;
+      }
+      if (inv.status === 'settled') {
+        totalEarnings += Math.max(0, inv.projectedReturn - inv.amount);
+      }
     }
   }
 
-  // If initial seed user Alexander Vance, preserve canonical figures
-  const activeInvestments = activeInvestmentsSum > 0 ? (activeInvestmentsSum === 5000 ? 35800.0 : activeInvestmentsSum) : 0;
-  const availableBalance = user.balance >= 35800 ? user.balance - 35800 : user.balance;
-  const totalPortfolio = availableBalance + activeInvestments;
+  const availableBalance = user.balance;
+  const totalPortfolio = availableBalance + activeInvestmentsSum;
 
   res.status(200).json({
     success: true,
     data: {
       totalPortfolio: Number(totalPortfolio.toFixed(2)),
       availableBalance: Number(availableBalance.toFixed(2)),
-      activeInvestments: Number(activeInvestments.toFixed(2)),
-      totalEarnings: 8420.5,
-      growth24h: 4.82,
+      activeInvestments: Number(activeInvestmentsSum.toFixed(2)),
+      totalEarnings: Number(totalEarnings.toFixed(2)),
+      growth24h: 0.0,
       currency: user.currencyPreference || 'USD',
     },
   });
@@ -37,7 +42,7 @@ router.get('/wallet/summary', authenticate, (req: AuthenticatedRequest, res: Res
 // GET /api/v1/analytics/chart?period=1D|1W|1M|1Y|ALL
 router.get('/analytics/chart', (req: Request, res: Response): void => {
   const period = (req.query.period as string) || '1M';
-  const data = db.getChartData(period);
+  const data = db.getChartData(period, 0);
 
   res.status(200).json({
     success: true,

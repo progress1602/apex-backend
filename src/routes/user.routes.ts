@@ -10,11 +10,15 @@ router.get('/profile', authenticate, (req: AuthenticatedRequest, res: Response):
     id: user.id,
     name: user.name,
     email: user.email,
-    phone: user.phone || '+1 (555) 234-5678',
-    tier: user.tier,
-    is2FAEnabled: user.is2FAEnabled,
+    phone: user.phone || '',
+    tier: user.tier || 'Tier 1 - Standard',
+    is2FAEnabled: user.is2FAEnabled || false,
     currencyPreference: user.currencyPreference || 'USD',
-    notifications: user.notifications,
+    notifications: user.notifications || {
+      email: true,
+      sms: false,
+      yieldAlerts: false,
+    },
   });
 });
 

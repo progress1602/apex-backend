@@ -39,17 +39,6 @@ export const authenticate = (
 
   const token = authHeader.split(' ')[1];
 
-  // Handle mock/demo token directly for playground convenience
-  if (token.startsWith('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9') || token === 'demo_token' || token === 'apex_token_alexander') {
-    const user = db.users.get('usr_8829104');
-    if (user) {
-      req.user = user;
-      req.tokenPayload = { userId: user.id, email: user.email, role: user.role };
-      next();
-      return;
-    }
-  }
-
   try {
     const decoded = jwt.verify(token, JWT_SECRET) as AuthTokenPayload;
     const user = db.users.get(decoded.userId);

@@ -49,9 +49,22 @@ export async function setupApolloServer(app: Express) {
         document: \`# ========================================================
 # 🚀 ApexBridge Apollo Sandbox Playground
 # ========================================================
-# Run queries, explore schema, and execute mutations live!
+# 1. Sign up or Login with your email & password:
+mutation LoginUser {
+  login(email: "your_email@example.com", password: "your_password") {
+    success
+    token
+    user {
+      id
+      name
+      email
+      balance
+    }
+  }
+}
 
-query GetInvestorDashboard {
+# 2. Query your own dashboard data (pass your token in Headers: { "Authorization": "Bearer <YOUR_TOKEN>" }):
+query GetMyDashboard {
   me {
     id
     name
@@ -64,7 +77,6 @@ query GetInvestorDashboard {
     availableBalance
     activeInvestments
     totalEarnings
-    growth24h
     currency
   }
   marketTickers {
@@ -78,22 +90,16 @@ query GetInvestorDashboard {
     roi
     minAmount
     maxAmount
-    feeRate
   }
   userInvestments {
     id
     planName
     amount
     roi
-    progress
-    projectedReturn
     status
   }
 }
-\`,
-        headers: {
-          authorization: "Bearer demo_token"
-        }
+\`
       }
     });
   </script>
@@ -113,20 +119,16 @@ query GetInvestorDashboard {
 
   // Handle GraphQL POST requests
   app.post('/graphql', async (req: Request, res: Response) => {
-    const authHeader = req.headers.authorization || '';
+    const authHeader = req.headers.authorization || req.headers['authorization'] || '';
     let user: User | undefined = undefined;
 
-    if (authHeader.startsWith('Bearer ')) {
+    if (typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
       const token = authHeader.split(' ')[1];
-      if (token === 'demo_token' || token.startsWith('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9')) {
-        user = db.users.get('usr_8829104');
-      } else {
-        try {
-          const decoded = jwt.verify(token, JWT_SECRET) as AuthTokenPayload;
-          user = db.users.get(decoded.userId);
-        } catch {
-          // Token invalid, user remains undefined
-        }
+      try {
+        const decoded = jwt.verify(token, JWT_SECRET) as AuthTokenPayload;
+        user = db.users.get(decoded.userId);
+      } catch {
+        // Token invalid, user remains undefined
       }
     }
 

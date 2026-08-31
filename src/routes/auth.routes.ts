@@ -1,6 +1,5 @@
 import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
-import { v4 as uuidv4 } from 'uuid';
 import { db } from '../store/db';
 import { generateToken, authenticate, AuthenticatedRequest } from '../middleware/auth';
 import { User } from '../types';
@@ -9,7 +8,7 @@ const router = Router();
 
 // POST /api/v1/auth/signup
 router.post('/signup', (req: Request, res: Response): void => {
-  const { fullName, email, password } = req.body;
+  const { fullName, name, email, password } = req.body;
 
   if (!email || !password) {
     res.status(400).json({ success: false, message: 'Email and password are required' });
@@ -18,7 +17,6 @@ router.post('/signup', (req: Request, res: Response): void => {
 
   const existingUser = db.getUserByEmail(email);
   if (existingUser) {
-    // If testing signup with existing demo email, log in or return 409
     res.status(409).json({ success: false, message: 'An account with this email already exists' });
     return;
   }
@@ -26,21 +24,23 @@ router.post('/signup', (req: Request, res: Response): void => {
   const salt = bcrypt.genSaltSync(10);
   const passwordHash = bcrypt.hashSync(password, salt);
   const userId = `usr_${Math.floor(1000000 + Math.random() * 9000000)}`;
+  const userName = fullName || name || '';
 
   const newUser: User = {
     id: userId,
-    name: fullName || 'New Investor',
-    email,
+    name: userName,
+    email: email.trim(),
     passwordHash,
     role: 'investor',
     tier: 'Tier 1 - Standard',
     balance: 0.0,
+    phone: req.body.phone || '',
     is2FAEnabled: false,
-    currencyPreference: 'USD',
+    currencyPreference: req.body.currencyPreference || 'USD',
     notifications: {
       email: true,
       sms: false,
-      yieldAlerts: true,
+      yieldAlerts: false,
     },
     createdAt: new Date().toISOString(),
   };
@@ -57,6 +57,7 @@ router.post('/signup', (req: Request, res: Response): void => {
       email: newUser.email,
       role: newUser.role,
       tier: newUser.tier,
+      balance: newUser.balance,
       is2FAEnabled: newUser.is2FAEnabled,
       createdAt: newUser.createdAt,
     },
@@ -78,7 +79,7 @@ router.post('/login', (req: Request, res: Response): void => {
     return;
   }
 
-  const isValidPassword = bcrypt.compareSync(password, user.passwordHash) || password === 'SecurePassword123!';
+  const isValidPassword = bcrypt.compareSync(password, user.passwordHash);
   if (!isValidPassword) {
     res.status(401).json({ success: false, message: 'Invalid email or password' });
     return;
@@ -93,7 +94,7 @@ router.post('/login', (req: Request, res: Response): void => {
       id: user.id,
       name: user.name,
       email: user.email,
-      avatar: user.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb',
+      avatar: user.avatar || '',
       tier: user.tier,
       balance: user.balance,
     },

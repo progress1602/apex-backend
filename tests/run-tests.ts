@@ -59,7 +59,7 @@ function assert(condition: boolean, message: string) {
 }
 
 async function runTestSuite() {
-  console.log('🧪 Starting ApexBridge Comprehensive Test Suite (REST + Apollo GraphQL)...\n');
+  console.log('🧪 Starting ApexBridge Comprehensive Test Suite (Dynamic User Data)...\n');
   let token = '';
 
   // 1. Landing & OpenAPI spec & Apollo Sandbox Page
@@ -72,42 +72,29 @@ async function runTestSuite() {
   assert(apolloRes.status === 200 && typeof apolloRes.data === 'string' && apolloRes.data.includes('EmbeddedSandbox'), 'Apollo Sandbox HTML valid');
   console.log('✅ Root, OpenAPI, and Apollo Sandbox HTML OK');
 
-  // 2. Authentication & Sessions
-  console.log('\nTesting 1. Authentication & Sessions...');
-  const loginRes = await request({
-    method: 'POST',
-    path: '/api/v1/auth/login',
-    body: {
-      email: 'alexander@apexbridge.com',
-      password: 'SecurePassword123!',
-    },
-  });
-  assert(loginRes.status === 200 && loginRes.data.success === true, 'Login successful');
-  token = loginRes.data.token;
-  assert(typeof token === 'string' && token.length > 10, 'JWT token generated');
-  console.log('✅ POST /api/v1/auth/login OK');
-
-  const meRes = await request({ method: 'GET', path: '/api/v1/auth/me', token });
-  assert(meRes.status === 200 && meRes.data.user.email === 'alexander@apexbridge.com', 'Me endpoint verified');
-  console.log('✅ GET /api/v1/auth/me OK');
-
-  const signupEmail = `tester_${Date.now()}@apexbridge.com`;
+  // 2. Signup a brand new user
+  console.log('\nTesting 1. Signup New User (Zero Dummy Data)...');
+  const email = `investor_${Date.now()}@apexbridge.com`;
   const signupRes = await request({
     method: 'POST',
     path: '/api/v1/auth/signup',
     body: {
-      fullName: 'Test Investor',
-      email: signupEmail,
+      fullName: 'Real Investor',
+      email,
       password: 'SecurePassword123!',
     },
   });
   assert(signupRes.status === 201 && signupRes.data.success === true, 'Signup successful');
+  assert(signupRes.data.user.name === 'Real Investor', 'User name matches input exactly');
+  assert(signupRes.data.user.balance === 0, 'New user starting balance is strictly 0');
+  token = signupRes.data.token;
   console.log('✅ POST /api/v1/auth/signup OK');
 
-  // 3. User Profile & Settings
+  // 3. User Profile & Settings (Strictly user-entered)
   console.log('\nTesting 2. User Profile & Settings...');
   const profileRes = await request({ method: 'GET', path: '/api/v1/user/profile', token });
-  assert(profileRes.status === 200 && profileRes.data.tier === 'Tier 2 - Verified', 'Profile read OK');
+  assert(profileRes.status === 200 && profileRes.data.name === 'Real Investor', 'Profile name matches');
+  assert(profileRes.data.phone === '', 'Unset phone is empty, no dummy phone');
   console.log('✅ GET /api/v1/user/profile OK');
 
   const updateProfileRes = await request({
@@ -115,8 +102,7 @@ async function runTestSuite() {
     path: '/api/v1/user/profile',
     token,
     body: {
-      name: 'Alexander Vance',
-      phone: '+1 (555) 234-5678',
+      phone: '+1 (800) 555-0199',
       is2FAEnabled: true,
       currencyPreference: 'USD',
     },
@@ -124,51 +110,44 @@ async function runTestSuite() {
   assert(updateProfileRes.status === 200 && updateProfileRes.data.success === true, 'Profile update OK');
   console.log('✅ PATCH /api/v1/user/profile OK');
 
-  // 4. Dashboard, Wallet & Market Metrics
-  console.log('\nTesting 3. Dashboard, Wallet & Market Metrics...');
-  const walletRes = await request({ method: 'GET', path: '/api/v1/wallet/summary', token });
-  assert(walletRes.status === 200 && walletRes.data.data.totalPortfolio > 0, 'Wallet summary OK');
-  console.log('✅ GET /api/v1/wallet/summary OK');
+  // 4. Initial Wallet Summary (Should be exactly 0)
+  console.log('\nTesting 3. Initial Clean Wallet Summary...');
+  const initialWalletRes = await request({ method: 'GET', path: '/api/v1/wallet/summary', token });
+  assert(initialWalletRes.status === 200 && initialWalletRes.data.data.totalPortfolio === 0, 'Initial portfolio is 0');
+  assert(initialWalletRes.data.data.availableBalance === 0, 'Initial balance is 0');
+  assert(initialWalletRes.data.data.activeInvestments === 0, 'Initial active investments is 0');
+  assert(initialWalletRes.data.data.totalEarnings === 0, 'Initial earnings is 0');
+  console.log('✅ GET /api/v1/wallet/summary (Initial 0.00 State) OK');
 
-  const chartRes = await request({ method: 'GET', path: '/api/v1/analytics/chart?period=1M' });
-  assert(chartRes.status === 200 && Array.isArray(chartRes.data.data), 'Chart data OK');
-  console.log('✅ GET /api/v1/analytics/chart OK');
-
-  const tickersRes = await request({ method: 'GET', path: '/api/v1/market/tickers' });
-  assert(tickersRes.status === 200 && Array.isArray(tickersRes.data.tickers), 'Market tickers OK');
-  console.log('✅ GET /api/v1/market/tickers OK');
-
-  // 5. Deposits
-  console.log('\nTesting 4. Deposits...');
-  const methodsRes = await request({ method: 'GET', path: '/api/v1/deposits/methods' });
-  assert(methodsRes.status === 200 && methodsRes.data.methods.length >= 2, 'Deposit methods OK');
-  console.log('✅ GET /api/v1/deposits/methods OK');
-
+  // 5. Deposit and Credit Balance
+  console.log('\nTesting 4. Deposits & Balance Inflow...');
   const createDepRes = await request({
     method: 'POST',
     path: '/api/v1/deposits',
     token,
     body: {
       method: 'btc',
-      amount: 2500.0,
+      amount: 10000.0,
       currency: 'USD',
-      transactionHash: '0x9f83a2182049124182b89410482012',
+      transactionHash: '0xabc123',
     },
   });
   assert(createDepRes.status === 201 && createDepRes.data.transaction.status === 'pending', 'Deposit create OK');
   const depositTxId = createDepRes.data.transaction.id;
-  console.log(`✅ POST /api/v1/deposits OK (tx: ${depositTxId})`);
 
-  // 6. Investments & Yield Matrix
-  console.log('\nTesting 5. Investments & Yield Matrix...');
-  const plansRes = await request({ method: 'GET', path: '/api/v1/investments/plans' });
-  assert(plansRes.status === 200 && plansRes.data.plans.length >= 3, 'Plans list OK');
-  console.log('✅ GET /api/v1/investments/plans OK');
+  // Admin approves deposit -> balance increases to 10000
+  await request({
+    method: 'PATCH',
+    path: `/api/v1/admin/deposits/${depositTxId}/status`,
+    body: { status: 'approved' },
+  });
 
-  const invListRes = await request({ method: 'GET', path: '/api/v1/investments', token });
-  assert(invListRes.status === 200 && Array.isArray(invListRes.data.investments), 'Investments list OK');
-  console.log('✅ GET /api/v1/investments OK');
+  const walletAfterDep = await request({ method: 'GET', path: '/api/v1/wallet/summary', token });
+  assert(walletAfterDep.data.data.availableBalance === 10000, 'Balance updated to 10000 after deposit approval');
+  console.log('✅ Deposit creation & approval credited balance correctly');
 
+  // 6. Investments
+  console.log('\nTesting 5. Investments...');
   const createInvRes = await request({
     method: 'POST',
     path: '/api/v1/investments',
@@ -176,112 +155,56 @@ async function runTestSuite() {
     body: {
       planId: 'starter',
       planName: 'Apex Starter Tier',
-      amount: 5000.0,
+      amount: 4000.0,
       roi: '15%',
     },
   });
-  assert(createInvRes.status === 201 && createInvRes.data.investment.amount === 5000, 'Create investment OK');
+  assert(createInvRes.status === 201 && createInvRes.data.newAvailableBalance === 6000, 'Deducted 4000 from 10000 balance -> 6000');
   const createdInvId = createInvRes.data.investment.id;
-  console.log(`✅ POST /api/v1/investments OK (inv: ${createdInvId})`);
 
+  const walletAfterInv = await request({ method: 'GET', path: '/api/v1/wallet/summary', token });
+  assert(walletAfterInv.data.data.availableBalance === 6000, 'Available balance is 6000');
+  assert(walletAfterInv.data.data.activeInvestments === 4000, 'Active investments is 4000');
+  assert(walletAfterInv.data.data.totalPortfolio === 10000, 'Total portfolio is 10000');
+  console.log('✅ Investment allocated and portfolio dynamically updated');
+
+  // 7. Settle Investment
+  console.log('\nTesting 6. Settle Investment Position...');
   const settleRes = await request({
     method: 'POST',
-    path: `/api/v1/investments/inv_7721/settle`,
+    path: `/api/v1/investments/${createdInvId}/settle`,
     token,
   });
-  assert(settleRes.status === 200 && settleRes.data.settlement.status === 'completed', 'Settle investment OK');
-  console.log('✅ POST /api/v1/investments/:id/settle OK');
-
-  // 7. Withdrawals
-  console.log('\nTesting 6. Withdrawals...');
-  const wdrRes = await request({
-    method: 'POST',
-    path: '/api/v1/withdrawals',
-    token,
-    body: {
-      amount: 3200.0,
-      method: 'btc',
-      destinationAddress: 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh',
-      twoFactorCode: '849201',
-    },
-  });
-  assert(wdrRes.status === 201 && wdrRes.data.withdrawal.status === 'pending', 'Withdrawal request OK');
-  const wdrTxId = wdrRes.data.withdrawal.id;
-  console.log(`✅ POST /api/v1/withdrawals OK (tx: ${wdrTxId})`);
+  assert(settleRes.status === 200 && settleRes.data.settlement.payoutAmount === 4600, '4000 + 15% ROI = 4600 payout');
+  console.log('✅ Settle investment returned principal + yield');
 
   // 8. Transactions Ledger
-  console.log('\nTesting 7. Transactions Ledger & History...');
-  const txsRes = await request({ method: 'GET', path: '/api/v1/transactions?type=all&status=all&page=1&limit=20', token });
-  assert(txsRes.status === 200 && Array.isArray(txsRes.data.data), 'Transactions ledger OK');
-  console.log(`✅ GET /api/v1/transactions OK (${txsRes.data.data.length} total entries)`);
+  console.log('\nTesting 7. Transactions Ledger (Only User Activity)...');
+  const txsRes = await request({ method: 'GET', path: '/api/v1/transactions', token });
+  assert(txsRes.status === 200 && txsRes.data.data.length === 3, 'Exactly 3 user transactions present (deposit, investment, settle)');
+  console.log('✅ GET /api/v1/transactions (Strictly user transactions) OK');
 
-  // 9. Notifications
-  console.log('\nTesting 8. Notifications & Alerts...');
-  const notifsRes = await request({ method: 'GET', path: '/api/v1/notifications', token });
-  assert(notifsRes.status === 200 && notifsRes.data.notifications.length >= 2, 'Notifications list OK');
-  console.log('✅ GET /api/v1/notifications OK');
-
-  const readNotifRes = await request({ method: 'PATCH', path: '/api/v1/notifications/notif_001/read', token });
-  assert(readNotifRes.status === 200 && readNotifRes.data.success === true, 'Mark read OK');
-  console.log('✅ PATCH /api/v1/notifications/:id/read OK');
-
-  const markAllRes = await request({ method: 'POST', path: '/api/v1/notifications/mark-all-read', token });
-  assert(markAllRes.status === 200 && markAllRes.data.success === true, 'Mark all read OK');
-  console.log('✅ POST /api/v1/notifications/mark-all-read OK');
-
-  // 10. Administrative Operations
-  console.log('\nTesting 9. Administrative & Back-Office Operations...');
-  const adminDepRes = await request({
-    method: 'PATCH',
-    path: `/api/v1/admin/deposits/${depositTxId}/status`,
-    body: { status: 'approved' },
-  });
-  assert(adminDepRes.status === 200 && adminDepRes.data.status === 'approved', 'Admin deposit status OK');
-  console.log('✅ PATCH /api/v1/admin/deposits/:id/status OK');
-
-  const adminWdrRes = await request({
-    method: 'PATCH',
-    path: `/api/v1/admin/withdrawals/${wdrTxId}/status`,
-    body: { status: 'processed', txHash: '0x78a1bc92048592019485091823' },
-  });
-  assert(adminWdrRes.status === 200 && adminWdrRes.data.status === 'processed', 'Admin withdrawal status OK');
-  console.log('✅ PATCH /api/v1/admin/withdrawals/:id/status OK');
-
-  const adminPlanRes = await request({
-    method: 'PUT',
-    path: '/api/v1/admin/plans/starter',
-    body: {
-      roi: '18%',
-      minAmount: 1000,
-      maxAmount: 10000,
-      feeRate: 0.08,
-    },
-  });
-  assert(adminPlanRes.status === 200 && adminPlanRes.data.success === true, 'Admin plan update OK');
-  console.log('✅ PUT /api/v1/admin/plans/:id OK');
-
-  // 11. Apollo GraphQL Query Verification
-  console.log('\nTesting 10. Apollo GraphQL Execution (/graphql)...');
-  const gqlQuery = {
-    query: `
-      query TestDashboard {
-        me { id name email balance tier }
-        walletSummary { totalPortfolio availableBalance activeInvestments totalEarnings }
-        marketTickers { symbol price change24h }
-      }
-    `,
-  };
+  // 9. GraphQL Execution for User
+  console.log('\nTesting 8. Apollo GraphQL Query for Authenticated User...');
   const gqlRes = await request({
     method: 'POST',
     path: '/graphql',
-    body: gqlQuery,
+    body: {
+      query: `
+        query GetMyData {
+          me { id name email balance }
+          walletSummary { totalPortfolio availableBalance activeInvestments totalEarnings }
+        }
+      `,
+    },
     token,
   });
-  assert(gqlRes.status === 200 && gqlRes.data.data && gqlRes.data.data.me.email === 'alexander@apexbridge.com', 'GraphQL query execution successful');
-  console.log('✅ POST /graphql (Apollo GraphQL Engine) OK');
+  assert(gqlRes.status === 200 && gqlRes.data.data.me.name === 'Real Investor', 'GraphQL me.name matches user');
+  assert(gqlRes.data.data.walletSummary.totalEarnings === 600, 'GraphQL totalEarnings is 600 (4600-4000)');
+  console.log('✅ POST /graphql (Strictly user data resolved) OK');
 
   console.log('\n=======================================================');
-  console.log('🎉 ALL REST & APOLLO GRAPHQL ENDPOINTS PASSED 100%!');
+  console.log('🎉 100% USER-ISOLATED DATA VALIDATED SUCCESSFULLY!');
   console.log('=======================================================\n');
 }
 

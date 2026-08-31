@@ -94,8 +94,6 @@ router.post('/', authenticate, (req: AuthenticatedRequest, res: Response): void 
   };
   db.transactions.unshift(ledgerItem);
 
-  const availableBalance = user.balance >= 35800 ? user.balance - 35800 : user.balance;
-
   res.status(201).json({
     success: true,
     investment: {
@@ -106,7 +104,7 @@ router.post('/', authenticate, (req: AuthenticatedRequest, res: Response): void 
       status: newInvestment.status,
       startDate: newInvestment.startDate,
     },
-    newAvailableBalance: Number(availableBalance.toFixed(2)),
+    newAvailableBalance: Number(user.balance.toFixed(2)),
   });
 });
 

@@ -5,50 +5,61 @@ import { User, DepositTransaction, UserInvestment, WithdrawalTransaction } from 
 
 export const resolvers = {
   User: {
-    id: (parent: any) => parent.id || 'usr_8829104',
-    name: (parent: any) => parent.name || parent.fullName || 'Alexander Vance',
-    email: (parent: any) => parent.email || 'alexander@apexbridge.com',
+    id: (parent: any) => parent.id,
+    name: (parent: any) => parent.name || parent.fullName || '',
+    email: (parent: any) => parent.email || '',
     role: (parent: any) => parent.role || 'investor',
-    tier: (parent: any) => parent.tier || 'Tier 2 - Verified',
-    avatar: (parent: any) => parent.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb',
-    balance: (parent: any) => (typeof parent.balance === 'number' ? parent.balance : 48250.0),
-    phone: (parent: any) => parent.phone || '+1 (555) 234-5678',
-    is2FAEnabled: (parent: any) => (typeof parent.is2FAEnabled === 'boolean' ? parent.is2FAEnabled : true),
+    tier: (parent: any) => parent.tier || 'Tier 1 - Standard',
+    avatar: (parent: any) => parent.avatar || '',
+    balance: (parent: any) => (typeof parent.balance === 'number' ? parent.balance : 0.0),
+    phone: (parent: any) => parent.phone || '',
+    is2FAEnabled: (parent: any) => Boolean(parent.is2FAEnabled),
     currencyPreference: (parent: any) => parent.currencyPreference || 'USD',
-    notifications: (parent: any) => parent.notifications || { email: true, sms: false, yieldAlerts: true },
+    notifications: (parent: any) => parent.notifications || { email: true, sms: false, yieldAlerts: false },
     createdAt: (parent: any) => parent.createdAt || new Date().toISOString(),
   },
 
   Query: {
     me: (_: any, __: any, context: { user?: User }) => {
-      return context.user || db.users.get('usr_8829104');
+      if (!context.user) throw new Error('Unauthorized: Missing or invalid token');
+      return context.user;
     },
     userProfile: (_: any, __: any, context: { user?: User }) => {
-      return context.user || db.users.get('usr_8829104');
+      if (!context.user) throw new Error('Unauthorized: Missing or invalid token');
+      return context.user;
     },
     walletSummary: (_: any, __: any, context: { user?: User }) => {
-      const user = context.user || db.users.get('usr_8829104')!;
+      if (!context.user) throw new Error('Unauthorized: Missing or invalid token');
+      const user = context.user;
       let activeInvestmentsSum = 0;
+      let totalEarnings = 0;
+
       for (const inv of db.userInvestments.values()) {
-        if (inv.userId === user.id && inv.status === 'active') {
-          activeInvestmentsSum += inv.amount;
+        if (inv.userId === user.id) {
+          if (inv.status === 'active') {
+            activeInvestmentsSum += inv.amount;
+          }
+          if (inv.status === 'settled') {
+            totalEarnings += Math.max(0, inv.projectedReturn - inv.amount);
+          }
         }
       }
-      const activeInvestments = activeInvestmentsSum > 0 ? (activeInvestmentsSum === 5000 ? 35800.0 : activeInvestmentsSum) : 0;
-      const availableBalance = user.balance >= 35800 ? user.balance - 35800 : user.balance;
-      const totalPortfolio = availableBalance + activeInvestments;
+
+      const availableBalance = user.balance;
+      const totalPortfolio = availableBalance + activeInvestmentsSum;
 
       return {
         totalPortfolio: Number(totalPortfolio.toFixed(2)),
         availableBalance: Number(availableBalance.toFixed(2)),
-        activeInvestments: Number(activeInvestments.toFixed(2)),
-        totalEarnings: 8420.5,
-        growth24h: 4.82,
+        activeInvestments: Number(activeInvestmentsSum.toFixed(2)),
+        totalEarnings: Number(totalEarnings.toFixed(2)),
+        growth24h: 0.0,
         currency: user.currencyPreference || 'USD',
       };
     },
-    analyticsChart: (_: any, { period }: { period?: string }) => {
-      return db.getChartData(period || '1M');
+    analyticsChart: (_: any, { period }: { period?: string }, context: { user?: User }) => {
+      const currentBalance = context.user ? context.user.balance : 0;
+      return db.getChartData(period || '1M', currentBalance);
     },
     marketTickers: () => {
       return db.marketTickers;
@@ -60,12 +71,12 @@ export const resolvers = {
       return Array.from(db.investmentPlans.values());
     },
     userInvestments: (_: any, __: any, context: { user?: User }) => {
-      const user = context.user || db.users.get('usr_8829104')!;
-      return Array.from(db.userInvestments.values()).filter((inv) => inv.userId === user.id);
+      if (!context.user) throw new Error('Unauthorized: Missing or invalid token');
+      return Array.from(db.userInvestments.values()).filter((inv) => inv.userId === context.user!.id);
     },
     transactions: (_: any, { type, status, page, limit }: { type?: string; status?: string; page?: number; limit?: number }, context: { user?: User }) => {
-      const user = context.user || db.users.get('usr_8829104')!;
-      let filtered = db.transactions.filter((tx) => tx.userId === user.id);
+      if (!context.user) throw new Error('Unauthorized: Missing or invalid token');
+      let filtered = db.transactions.filter((tx) => tx.userId === context.user!.id);
       if (type && type !== 'all') filtered = filtered.filter((tx) => tx.type.toLowerCase() === type.toLowerCase());
       if (status && status !== 'all') filtered = filtered.filter((tx) => tx.status.toLowerCase() === status.toLowerCase());
       const p = page || 1;
@@ -73,8 +84,8 @@ export const resolvers = {
       return filtered.slice((p - 1) * l, (p - 1) * l + l);
     },
     notifications: (_: any, __: any, context: { user?: User }) => {
-      const user = context.user || db.users.get('usr_8829104')!;
-      return Array.from(db.notifications.values()).filter((n) => n.userId === user.id);
+      if (!context.user) throw new Error('Unauthorized: Missing or invalid token');
+      return Array.from(db.notifications.values()).filter((n) => n.userId === context.user!.id);
     },
   },
 
@@ -90,15 +101,16 @@ export const resolvers = {
 
       const newUser: User = {
         id: userId,
-        name: fullName || 'New Investor',
-        email,
+        name: fullName || '',
+        email: email.trim(),
         passwordHash,
         role: 'investor',
         tier: 'Tier 1 - Standard',
         balance: 0.0,
+        phone: '',
         is2FAEnabled: false,
         currencyPreference: 'USD',
-        notifications: { email: true, sms: false, yieldAlerts: true },
+        notifications: { email: true, sms: false, yieldAlerts: false },
         createdAt: new Date().toISOString(),
       };
       db.users.set(newUser.id, newUser);
@@ -107,14 +119,11 @@ export const resolvers = {
     },
 
     login: (_: any, { email, password }: { email: string; password: string }) => {
-      let user = db.getUserByEmail(email);
-      if (!user && (email.toLowerCase() === 'alexander@apexbridge.com' || email.includes('alexander'))) {
-        user = db.users.get('usr_8829104');
-      }
+      const user = db.getUserByEmail(email);
       if (!user) {
         throw new Error('Invalid email or password');
       }
-      const isValidPassword = bcrypt.compareSync(password, user.passwordHash) || password === 'SecurePassword123!';
+      const isValidPassword = bcrypt.compareSync(password, user.passwordHash);
       if (!isValidPassword) {
         throw new Error('Invalid email or password');
       }
@@ -122,15 +131,13 @@ export const resolvers = {
       return {
         success: true,
         token,
-        user: {
-          ...user,
-          name: user.name || 'Alexander Vance',
-        },
+        user,
       };
     },
 
     updateProfile: (_: any, args: { name?: string; phone?: string; is2FAEnabled?: boolean; currencyPreference?: string }, context: { user?: User }) => {
-      const user = context.user || db.users.get('usr_8829104')!;
+      if (!context.user) throw new Error('Unauthorized: Missing or invalid token');
+      const user = context.user;
       if (args.name !== undefined) user.name = args.name;
       if (args.phone !== undefined) user.phone = args.phone;
       if (args.is2FAEnabled !== undefined) user.is2FAEnabled = args.is2FAEnabled;
@@ -139,7 +146,8 @@ export const resolvers = {
     },
 
     createDeposit: (_: any, { method, amount, currency, transactionHash }: { method: string; amount: number; currency?: string; transactionHash?: string }, context: { user?: User }) => {
-      const user = context.user || db.users.get('usr_8829104')!;
+      if (!context.user) throw new Error('Unauthorized: Missing or invalid token');
+      const user = context.user;
       const selectedMethod = db.depositMethods.find((m) => m.id.toLowerCase() === method.toLowerCase());
       const methodName = selectedMethod ? selectedMethod.name : method.toUpperCase();
       const txId = `tx_dep_${Math.floor(10000 + Math.random() * 90000)}`;
@@ -170,7 +178,8 @@ export const resolvers = {
     },
 
     createInvestment: (_: any, { planId, planName, amount, roi }: { planId?: string; planName?: string; amount: number; roi?: string }, context: { user?: User }) => {
-      const user = context.user || db.users.get('usr_8829104')!;
+      if (!context.user) throw new Error('Unauthorized: Missing or invalid token');
+      const user = context.user;
       const invAmount = Number(amount);
       if (user.balance < invAmount) throw new Error('Insufficient balance');
       user.balance -= invAmount;
@@ -215,9 +224,10 @@ export const resolvers = {
     },
 
     settleInvestment: (_: any, { id }: { id: string }, context: { user?: User }) => {
-      const user = context.user || db.users.get('usr_8829104')!;
+      if (!context.user) throw new Error('Unauthorized: Missing or invalid token');
+      const user = context.user;
       const inv = db.userInvestments.get(id);
-      if (!inv) throw new Error('Investment position not found');
+      if (!inv || inv.userId !== user.id) throw new Error('Investment position not found');
       const payoutAmount = inv.projectedReturn || inv.amount * 1.15;
       inv.status = 'settled';
       inv.progress = 100;
@@ -242,7 +252,8 @@ export const resolvers = {
     },
 
     createWithdrawal: (_: any, { amount, method, destinationAddress }: { amount: number; method?: string; destinationAddress: string; twoFactorCode?: string }, context: { user?: User }) => {
-      const user = context.user || db.users.get('usr_8829104')!;
+      if (!context.user) throw new Error('Unauthorized: Missing or invalid token');
+      const user = context.user;
       const wdrAmount = Number(amount);
       if (user.balance < wdrAmount) throw new Error('Insufficient balance');
       const fee = 15.0;
@@ -276,14 +287,16 @@ export const resolvers = {
       return withdrawal;
     },
 
-    markNotificationRead: (_: any, { id }: { id: string }) => {
+    markNotificationRead: (_: any, { id }: { id: string }, context: { user?: User }) => {
+      if (!context.user) throw new Error('Unauthorized: Missing or invalid token');
       const notif = db.notifications.get(id);
-      if (notif) notif.isRead = true;
+      if (notif && notif.userId === context.user.id) notif.isRead = true;
       return true;
     },
 
     markAllNotificationsRead: (_: any, __: any, context: { user?: User }) => {
-      const user = context.user || db.users.get('usr_8829104')!;
+      if (!context.user) throw new Error('Unauthorized: Missing or invalid token');
+      const user = context.user;
       for (const notif of db.notifications.values()) {
         if (notif.userId === user.id) notif.isRead = true;
       }
@@ -299,7 +312,7 @@ export const resolvers = {
           if (user) user.balance += deposit.amount;
         }
       }
-      return deposit || { id, type: 'deposit', amount: 2500, method: 'Bitcoin', status, createdAt: new Date().toISOString() };
+      return deposit || { id, type: 'deposit', amount: 0, method: 'Direct', status, createdAt: new Date().toISOString() };
     },
 
     adminUpdateWithdrawalStatus: (_: any, { id, status, txHash }: { id: string; status: string; txHash?: string }) => {
@@ -308,7 +321,7 @@ export const resolvers = {
         withdrawal.status = status.toLowerCase() as any;
         if (txHash) withdrawal.txHash = txHash;
       }
-      return withdrawal || { id, amount: 3200, fee: 15, netPayout: 3185, destinationAddress: 'bc1q...', status, createdAt: new Date().toISOString() };
+      return withdrawal || { id, amount: 0, fee: 0, netPayout: 0, destinationAddress: '', status, createdAt: new Date().toISOString() };
     },
 
     adminUpdatePlan: (_: any, { id, roi, minAmount, maxAmount, feeRate }: { id: string; roi?: string; minAmount?: number; maxAmount?: number; feeRate?: number }) => {
