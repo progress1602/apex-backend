@@ -1,0 +1,924 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "ApexBridge REST API",
+    "version": "1.0.0",
+    "description": "High-yield crypto and investment portal REST API specification. Supports complete authentication, live wallet tracking, deposit/withdrawal lifecycles, and yield management.",
+    "contact": {
+      "name": "ApexBridge Engineering",
+      "email": "support@apexbridge.io",
+      "url": "https://api.apexbridge.io"
+    }
+  },
+  "servers": [
+    {
+      "url": "/",
+      "description": "Current Server (Local or Cloud)"
+    },
+    {
+      "url": "https://api.apexbridge.io",
+      "description": "ApexBridge Production Base URL"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Enter JWT token obtained from `/api/v1/auth/login` or `/api/v1/auth/signup`."
+      }
+    },
+    "schemas": {
+      "User": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "example": "usr_8829104" },
+          "name": { "type": "string", "example": "Alexander Vance" },
+          "email": { "type": "string", "example": "alexander@apexbridge.com" },
+          "avatar": { "type": "string", "example": "https://images.unsplash.com/photo-1534528741775-53994a69daeb" },
+          "role": { "type": "string", "example": "investor" },
+          "tier": { "type": "string", "example": "Tier 2 - Verified" },
+          "balance": { "type": "number", "example": 48250.00 },
+          "is2FAEnabled": { "type": "boolean", "example": true },
+          "createdAt": { "type": "string", "example": "2026-08-30T10:00:00Z" }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/api/v1/auth/signup": {
+      "post": {
+        "summary": "Register a new investor account",
+        "tags": ["1. Authentication & Sessions"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["fullName", "email", "password"],
+                "properties": {
+                  "fullName": { "type": "string", "example": "Alexander Vance" },
+                  "email": { "type": "string", "example": "alexander@apexbridge.com" },
+                  "password": { "type": "string", "example": "SecurePassword123!" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Account created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "token": { "type": "string", "example": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." },
+                    "user": { "$ref": "#/components/schemas/User" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/login": {
+      "post": {
+        "summary": "Authenticate existing credentials and start session",
+        "tags": ["1. Authentication & Sessions"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["email", "password"],
+                "properties": {
+                  "email": { "type": "string", "example": "alexander@apexbridge.com" },
+                  "password": { "type": "string", "example": "SecurePassword123!" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authenticated session active",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "token": { "type": "string", "example": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." },
+                    "user": { "$ref": "#/components/schemas/User" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/me": {
+      "get": {
+        "summary": "Retrieve current authenticated session and profile",
+        "tags": ["1. Authentication & Sessions"],
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "Current user profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "user": { "$ref": "#/components/schemas/User" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/user/profile": {
+      "get": {
+        "summary": "Get user settings, security status, and KYC verification tier",
+        "tags": ["2. User Profile & Settings"],
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "User profile details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "string", "example": "usr_8829104" },
+                    "name": { "type": "string", "example": "Alexander Vance" },
+                    "email": { "type": "string", "example": "alexander@apexbridge.com" },
+                    "phone": { "type": "string", "example": "+1 (555) 234-5678" },
+                    "tier": { "type": "string", "example": "Tier 2 - Verified" },
+                    "is2FAEnabled": { "type": "boolean", "example": true },
+                    "currencyPreference": { "type": "string", "example": "USD" },
+                    "notifications": {
+                      "type": "object",
+                      "properties": {
+                        "email": { "type": "boolean", "example": true },
+                        "sms": { "type": "boolean", "example": false },
+                        "yieldAlerts": { "type": "boolean", "example": true }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "summary": "Update user profile and security preferences",
+        "tags": ["2. User Profile & Settings"],
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string", "example": "Alexander Vance" },
+                  "phone": { "type": "string", "example": "+1 (555) 234-5678" },
+                  "is2FAEnabled": { "type": "boolean", "example": true },
+                  "currencyPreference": { "type": "string", "example": "USD" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Profile updated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "message": { "type": "string", "example": "Profile updated successfully" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/wallet/summary": {
+      "get": {
+        "summary": "Fetch total portfolio, balances, earnings, and 24h percentage",
+        "tags": ["3. Dashboard, Wallet & Market Metrics"],
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "Wallet summary overview",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "totalPortfolio": { "type": "number", "example": 48250.00 },
+                        "availableBalance": { "type": "number", "example": 12450.00 },
+                        "activeInvestments": { "type": "number", "example": 35800.00 },
+                        "totalEarnings": { "type": "number", "example": 8420.50 },
+                        "growth24h": { "type": "number", "example": 4.82 },
+                        "currency": { "type": "string", "example": "USD" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/analytics/chart": {
+      "get": {
+        "summary": "Historical portfolio performance data points for charts",
+        "tags": ["3. Dashboard, Wallet & Market Metrics"],
+        "parameters": [
+          {
+            "name": "period",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["1D", "1W", "1M", "1Y", "ALL"],
+              "default": "1M"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Chart data series",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "timestamp": { "type": "string", "example": "2026-08-30T00:00:00Z" },
+                          "value": { "type": "number", "example": 48250.00 }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/tickers": {
+      "get": {
+        "summary": "Real-time price and ticker data for header/dashboard cards",
+        "tags": ["3. Dashboard, Wallet & Market Metrics"],
+        "responses": {
+          "200": {
+            "description": "List of current tickers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "tickers": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "symbol": { "type": "string", "example": "BTC/USD" },
+                          "price": { "type": "number", "example": 89450.00 },
+                          "change24h": { "type": "number", "example": 3.4 }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/deposits/methods": {
+      "get": {
+        "summary": "Get available cryptocurrency deposit methods and addresses",
+        "tags": ["4. Deposits"],
+        "responses": {
+          "200": {
+            "description": "List of deposit methods",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "methods": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": { "type": "string", "example": "btc" },
+                          "name": { "type": "string", "example": "Bitcoin (BTC)" },
+                          "network": { "type": "string", "example": "Bitcoin Mainnet" },
+                          "address": { "type": "string", "example": "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh" },
+                          "minDeposit": { "type": "number", "example": 50.00 },
+                          "confirmationsRequired": { "type": "integer", "example": 2 }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/deposits": {
+      "post": {
+        "summary": "Submit a deposit notification or transaction hash for verification",
+        "tags": ["4. Deposits"],
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["method", "amount", "currency"],
+                "properties": {
+                  "method": { "type": "string", "example": "btc" },
+                  "amount": { "type": "number", "example": 2500.00 },
+                  "currency": { "type": "string", "example": "USD" },
+                  "transactionHash": { "type": "string", "example": "0x9f83a2182049124182b89410482012" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Deposit submitted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "transaction": {
+                      "type": "object",
+                      "properties": {
+                        "id": { "type": "string", "example": "tx_dep_99401" },
+                        "type": { "type": "string", "example": "deposit" },
+                        "amount": { "type": "number", "example": 2500.00 },
+                        "method": { "type": "string", "example": "Bitcoin (BTC)" },
+                        "status": { "type": "string", "example": "pending" },
+                        "createdAt": { "type": "string", "example": "2026-08-30T21:30:00Z" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/investments/plans": {
+      "get": {
+        "summary": "List all active investment plans and yield rates",
+        "tags": ["5. Investments & Yield Matrix"],
+        "responses": {
+          "200": {
+            "description": "List of plans",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "plans": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": { "type": "string", "example": "starter" },
+                          "name": { "type": "string", "example": "Apex Starter Tier" },
+                          "roi": { "type": "string", "example": "15%" },
+                          "durationDays": { "type": "integer", "example": 7 },
+                          "minAmount": { "type": "number", "example": 500 },
+                          "maxAmount": { "type": "number", "example": 4999 },
+                          "feeRate": { "type": "number", "example": 0.10 },
+                          "status": { "type": "string", "example": "active" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/investments": {
+      "get": {
+        "summary": "Get user's active, in-progress, and matured investments",
+        "tags": ["5. Investments & Yield Matrix"],
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "User investments list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "investments": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": { "type": "string", "example": "inv_7721" },
+                          "planName": { "type": "string", "example": "Apex Starter Tier" },
+                          "amount": { "type": "number", "example": 5000.00 },
+                          "roi": { "type": "string", "example": "15%" },
+                          "progress": { "type": "number", "example": 74.2 },
+                          "projectedReturn": { "type": "number", "example": 5750.00 },
+                          "status": { "type": "string", "example": "active" },
+                          "startDate": { "type": "string", "example": "2026-08-25T00:00:00Z" },
+                          "maturityDate": { "type": "string", "example": "2026-09-01T00:00:00Z" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create new investment allocated from available wallet balance",
+        "tags": ["5. Investments & Yield Matrix"],
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["planId", "planName", "amount", "roi"],
+                "properties": {
+                  "planId": { "type": "string", "example": "starter" },
+                  "planName": { "type": "string", "example": "Apex Starter Tier" },
+                  "amount": { "type": "number", "example": 5000.00 },
+                  "roi": { "type": "string", "example": "15%" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Investment position created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "investment": {
+                      "type": "object",
+                      "properties": {
+                        "id": { "type": "string", "example": "inv_7722" },
+                        "planName": { "type": "string", "example": "Apex Starter Tier" },
+                        "amount": { "type": "number", "example": 5000.00 },
+                        "roi": { "type": "string", "example": "15%" },
+                        "status": { "type": "string", "example": "active" },
+                        "startDate": { "type": "string", "example": "2026-08-30T21:35:00Z" }
+                      }
+                    },
+                    "newAvailableBalance": { "type": "number", "example": 7450.00 }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/investments/{id}/settle": {
+      "post": {
+        "summary": "Withdraw/settle a 100% completed investment into main wallet balance",
+        "tags": ["5. Investments & Yield Matrix"],
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "example": "inv_7721" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Settlement credited to balance",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "settlement": {
+                      "type": "object",
+                      "properties": {
+                        "investmentId": { "type": "string", "example": "inv_7721" },
+                        "payoutAmount": { "type": "number", "example": 5750.00 },
+                        "creditedBalance": { "type": "number", "example": 54000.00 },
+                        "transactionId": { "type": "string", "example": "tx_settle_99402" },
+                        "status": { "type": "string", "example": "completed" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/withdrawals": {
+      "post": {
+        "summary": "Request withdrawal of funds to an external crypto wallet",
+        "tags": ["6. Withdrawals"],
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["amount", "method", "destinationAddress"],
+                "properties": {
+                  "amount": { "type": "number", "example": 3200.00 },
+                  "method": { "type": "string", "example": "btc" },
+                  "destinationAddress": { "type": "string", "example": "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh" },
+                  "twoFactorCode": { "type": "string", "example": "849201" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Withdrawal requested",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "withdrawal": {
+                      "type": "object",
+                      "properties": {
+                        "id": { "type": "string", "example": "tx_wdr_10294" },
+                        "amount": { "type": "number", "example": 3200.00 },
+                        "fee": { "type": "number", "example": 15.00 },
+                        "netPayout": { "type": "number", "example": 3185.00 },
+                        "destinationAddress": { "type": "string", "example": "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh" },
+                        "status": { "type": "string", "example": "pending" },
+                        "createdAt": { "type": "string", "example": "2026-08-30T21:35:00Z" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/transactions": {
+      "get": {
+        "summary": "Retrieve filtered, paginated transaction history",
+        "tags": ["7. Transactions Ledger & History"],
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string", "enum": ["all", "deposit", "withdrawal", "investment"], "default": "all" }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string", "enum": ["all", "pending", "approved", "completed", "rejected"], "default": "all" }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "default": 1 }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "default": 20 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated transaction list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": { "type": "string", "example": "tx_99120" },
+                          "type": { "type": "string", "example": "deposit" },
+                          "amount": { "type": "number", "example": 2500.00 },
+                          "status": { "type": "string", "example": "approved" },
+                          "plan": { "type": "string", "example": "Direct Inflow" },
+                          "date": { "type": "string", "example": "2026-08-30T14:20:00Z" }
+                        }
+                      }
+                    },
+                    "pagination": {
+                      "type": "object",
+                      "properties": {
+                        "total": { "type": "integer", "example": 3 },
+                        "page": { "type": "integer", "example": 1 },
+                        "totalPages": { "type": "integer", "example": 1 }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/notifications": {
+      "get": {
+        "summary": "Fetch list of notifications and announcements for the user",
+        "tags": ["8. Notifications & Alerts"],
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "User notifications",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "notifications": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": { "type": "string", "example": "notif_001" },
+                          "title": { "type": "string", "example": "Yield Cycle Complete" },
+                          "message": { "type": "string", "example": "Your Apex Starter Tier position has matured with +15% ROI." },
+                          "type": { "type": "string", "example": "yield" },
+                          "isRead": { "type": "boolean", "example": false },
+                          "createdAt": { "type": "string", "example": "2026-08-30T20:00:00Z" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/notifications/{id}/read": {
+      "patch": {
+        "summary": "Mark a specific notification as read",
+        "tags": ["8. Notifications & Alerts"],
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "example": "notif_001" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Marked read status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "message": { "type": "string", "example": "Notification marked as read" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/notifications/mark-all-read": {
+      "post": {
+        "summary": "Mark all user notifications as read",
+        "tags": ["8. Notifications & Alerts"],
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "Marked all notifications as read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "message": { "type": "string", "example": "All notifications marked as read" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/deposits/{id}/status": {
+      "patch": {
+        "summary": "Admin approval or rejection of user deposits",
+        "tags": ["9. Administrative & Back-Office Operations"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "example": "tx_dep_99401" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["status"],
+                "properties": {
+                  "status": { "type": "string", "enum": ["approved", "rejected", "pending"], "example": "approved" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Deposit status updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "transactionId": { "type": "string", "example": "tx_dep_99401" },
+                    "status": { "type": "string", "example": "approved" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/withdrawals/{id}/status": {
+      "patch": {
+        "summary": "Admin processing or rejection of withdrawal requests",
+        "tags": ["9. Administrative & Back-Office Operations"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "example": "tx_wdr_10294" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["status"],
+                "properties": {
+                  "status": { "type": "string", "enum": ["processed", "approved", "rejected", "pending"], "example": "processed" },
+                  "txHash": { "type": "string", "example": "0x78a1bc92048592019485091823" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Withdrawal status updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "transactionId": { "type": "string", "example": "tx_wdr_10294" },
+                    "status": { "type": "string", "example": "processed" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/plans/{id}": {
+      "put": {
+        "summary": "Update investment plan parameters, returns, and minimums",
+        "tags": ["9. Administrative & Back-Office Operations"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "example": "starter" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "roi": { "type": "string", "example": "18%" },
+                  "minAmount": { "type": "number", "example": 1000 },
+                  "maxAmount": { "type": "number", "example": 10000 },
+                  "feeRate": { "type": "number", "example": 0.08 }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Plan updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "message": { "type": "string", "example": "Plan configuration updated" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

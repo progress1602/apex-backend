@@ -1,0 +1,45 @@
+{
+  "name": "apexbridge-backend",
+  "version": "1.0.0",
+  "description": "ApexBridge REST API Backend with Swagger Playground, JWT Auth, and Live Data Store",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc && node -e \"if (!require('fs').existsSync('dist/swagger')) require('fs').mkdirSync('dist/swagger', {recursive: true}); require('fs').copyFileSync('src/swagger/openapi.json', 'dist/swagger/openapi.json');\"",
+    "start": "node dist/server.js",
+    "test": "tsx tests/run-tests.ts"
+  },
+  "keywords": [
+    "apexbridge",
+    "crypto",
+    "investment",
+    "rest-api",
+    "express",
+    "typescript"
+  ],
+  "author": "ApexBridge Team",
+  "license": "MIT",
+  "dependencies": {
+    "@apollo/server": "^5.5.1",
+    "@scalar/express-api-reference": "latest",
+    "bcryptjs": "^3.0.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "graphql": "^16.14.2",
+    "jsonwebtoken": "^9.0.2",
+    "swagger-ui-express": "^5.0.1",
+    "uuid": "^11.1.0"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/jsonwebtoken": "^9.0.9",
+    "@types/node": "^22.13.10",
+    "@types/swagger-ui-express": "^4.1.8",
+    "@types/uuid": "^10.0.0",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
+  }
+}
