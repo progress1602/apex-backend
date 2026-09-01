@@ -1,0 +1,137 @@
+{
+  "users": [
+    [
+      "usr_7887622",
+      {
+        "id": "usr_7887622",
+        "name": "Balance Adjustment Tester",
+        "email": "investor_1788225159726@apexbridge.com",
+        "passwordHash": "$2b$10$8QJqTM8Cfa.1KGOXmgKQlekaV.Hf16e17x9IvbZhEG98suQr.qkpW",
+        "role": "investor",
+        "tier": "Tier 1 - Standard",
+        "balance": 26750,
+        "phone": "",
+        "is2FAEnabled": false,
+        "currencyPreference": "USD",
+        "notifications": {
+          "email": true,
+          "sms": false,
+          "yieldAlerts": false
+        },
+        "createdAt": "2026-09-01T01:12:40.181Z"
+      }
+    ]
+  ],
+  "depositTransactions": [
+    [
+      "tx_dep_76107",
+      {
+        "id": "tx_dep_76107",
+        "userId": "usr_7887622",
+        "userName": "Balance Adjustment Tester",
+        "userEmail": "investor_1788225159726@apexbridge.com",
+        "type": "deposit",
+        "amount": 5000,
+        "method": "Bitcoin (BTC)",
+        "currency": "USD",
+        "transactionHash": "0x998877665544332211",
+        "receiptImage": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+        "status": "approved",
+        "createdAt": "2026-09-01T01:12:40.226Z"
+      }
+    ]
+  ],
+  "userInvestments": [
+    [
+      "inv_1992",
+      {
+        "id": "inv_1992",
+        "userId": "usr_7887622",
+        "planId": "vault",
+        "planName": "Quantum Yield Vault",
+        "amount": 5000,
+        "roi": "35%",
+        "progress": 100,
+        "projectedReturn": 6750,
+        "status": "settled",
+        "startDate": "2026-09-01T01:12:40.238Z",
+        "maturityDate": "2026-09-15T01:12:40.238Z"
+      }
+    ]
+  ],
+  "withdrawalTransactions": [],
+  "transactions": [
+    {
+      "id": "tx_settle_82522",
+      "userId": "usr_7887622",
+      "type": "investment",
+      "amount": 6750,
+      "status": "completed",
+      "plan": "Quantum Yield Vault Settlement",
+      "date": "2026-09-01T01:12:40.246Z"
+    },
+    {
+      "id": "tx_81142",
+      "userId": "usr_7887622",
+      "type": "investment",
+      "amount": 5000,
+      "status": "approved",
+      "plan": "Quantum Yield Vault",
+      "date": "2026-09-01T01:12:40.238Z"
+    },
+    {
+      "id": "tx_dep_76107",
+      "userId": "usr_7887622",
+      "type": "deposit",
+      "amount": 5000,
+      "status": "approved",
+      "plan": "Direct Inflow",
+      "receiptImage": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+      "date": "2026-09-01T01:12:40.226Z"
+    },
+    {
+      "id": "tx_adj_61433",
+      "userId": "usr_7887622",
+      "type": "withdrawal",
+      "amount": 5000,
+      "status": "completed",
+      "plan": "Fee Correction (-$5000.00)",
+      "date": "2026-09-01T01:12:40.210Z"
+    },
+    {
+      "id": "tx_adj_35103",
+      "userId": "usr_7887622",
+      "type": "deposit",
+      "amount": 25000,
+      "status": "completed",
+      "plan": "VIP Promotion Credit (+$25000.00)",
+      "date": "2026-09-01T01:12:40.196Z"
+    }
+  ],
+  "notifications": [
+    [
+      "notif_80248",
+      {
+        "id": "notif_80248",
+        "userId": "usr_7887622",
+        "title": "Funds Added to Wallet",
+        "message": "An administrative balance adjustment of +$25000.00 USD was applied to your account. New Balance: $25000.00 USD.",
+        "type": "deposit",
+        "isRead": false,
+        "createdAt": "2026-09-01T01:12:40.196Z"
+      }
+    ],
+    [
+      "notif_63284",
+      {
+        "id": "notif_63284",
+        "userId": "usr_7887622",
+        "title": "Funds Deducted from Wallet",
+        "message": "An administrative balance adjustment of -$5000.00 USD was applied to your account. New Balance: $20000.00 USD.",
+        "type": "withdrawal",
+        "isRead": false,
+        "createdAt": "2026-09-01T01:12:40.210Z"
+      }
+    ]
+  ]
+}

@@ -1,5 +1,4 @@
 import express, { Request, Response, NextFunction } from 'express';
-import cors from 'cors';
 import swaggerUi from 'swagger-ui-express';
 import { apiReference } from '@scalar/express-api-reference';
 import openapiSpec from './swagger/openapi.json';
@@ -18,18 +17,36 @@ import { setupApolloServer } from './graphql/apollo';
 
 export const app = express();
 
-// Open CORS for all playgrounds (Apollo Sandbox, Postman, Hoppscotch, web apps)
-app.use(
-  cors({
-    origin: '*',
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin', 'apollo-require-preflight'],
-    credentials: true,
-  })
-);
+// Robust CORS Middleware: Allows any browser, frontend, or playground (Apollo, Postman, Swagger)
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const origin = req.headers.origin;
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  }
+
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader(
+    'Access-Control-Allow-Methods',
+    'GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS'
+  );
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'Origin, X-Requested-With, Content-Type, Accept, Authorization, apollo-require-preflight, x-apollo-operation-name, *'
+  );
+  res.setHeader('Access-Control-Max-Age', '86400');
+
+  if (req.method === 'OPTIONS') {
+    res.sendStatus(204);
+    return;
+  }
+  next();
+});
+
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Serve raw OpenAPI JSON for external tooling / playgrounds
 app.get(['/openapi.json', '/api/v1/openapi.json'], (_req: Request, res: Response) => {
@@ -99,15 +116,6 @@ app.get('/', (_req: Request, res: Response) => {
           <a href="/playground" class="btn btn-primary">🎮 Open Swagger Playground</a>
           <a href="/scalar" class="btn btn-secondary">📚 Open Scalar Docs</a>
           <a href="/openapi.json" class="btn btn-secondary" target="_blank">⚙️ OpenAPI Spec (JSON)</a>
-        </div>
-
-        <div class="card">
-          <h3 style="margin-top:0; color:#e2e8f0;">Pre-seeded Demo Credentials:</h3>
-          <ul>
-            <li><strong>Email:</strong> <code>alexander@apexbridge.com</code></li>
-            <li><strong>Password:</strong> <code>SecurePassword123!</code></li>
-            <li><strong>Preloaded Balance:</strong> <code>$48,250.00 USD</code></li>
-          </ul>
         </div>
       </div>
     </body>

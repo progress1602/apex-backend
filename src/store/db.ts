@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import {
   User,
   DepositMethod,
@@ -10,6 +12,9 @@ import {
   MarketTicker,
   ChartDataPoint,
 } from '../types';
+
+const DATA_DIR = path.join(process.cwd(), 'data');
+const DB_FILE = path.join(DATA_DIR, 'db.json');
 
 class DataStore {
   public users: Map<string, User> = new Map();
@@ -24,6 +29,7 @@ class DataStore {
 
   constructor() {
     this.seedPlatformConfig();
+    this.loadFromDisk();
   }
 
   private seedPlatformConfig() {
@@ -108,10 +114,60 @@ class DataStore {
     ];
   }
 
+  public saveToDisk() {
+    try {
+      if (!fs.existsSync(DATA_DIR)) {
+        fs.mkdirSync(DATA_DIR, { recursive: true });
+      }
+      const data = {
+        users: Array.from(this.users.entries()),
+        depositTransactions: Array.from(this.depositTransactions.entries()),
+        userInvestments: Array.from(this.userInvestments.entries()),
+        withdrawalTransactions: Array.from(this.withdrawalTransactions.entries()),
+        transactions: this.transactions,
+        notifications: Array.from(this.notifications.entries()),
+      };
+      fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), 'utf-8');
+    } catch (err) {
+      console.error('Failed to persist database to disk:', err);
+    }
+  }
+
+  public loadFromDisk() {
+    try {
+      if (fs.existsSync(DB_FILE)) {
+        const raw = fs.readFileSync(DB_FILE, 'utf-8');
+        const data = JSON.parse(raw);
+
+        if (Array.isArray(data.users)) {
+          this.users = new Map(data.users);
+        }
+        if (Array.isArray(data.depositTransactions)) {
+          this.depositTransactions = new Map(data.depositTransactions);
+        }
+        if (Array.isArray(data.userInvestments)) {
+          this.userInvestments = new Map(data.userInvestments);
+        }
+        if (Array.isArray(data.withdrawalTransactions)) {
+          this.withdrawalTransactions = new Map(data.withdrawalTransactions);
+        }
+        if (Array.isArray(data.transactions)) {
+          this.transactions = data.transactions;
+        }
+        if (Array.isArray(data.notifications)) {
+          this.notifications = new Map(data.notifications);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load database from disk:', err);
+    }
+  }
+
   public getUserByEmail(email: string): User | undefined {
     if (!email) return undefined;
+    const normalized = email.trim().toLowerCase();
     for (const user of this.users.values()) {
-      if (user.email && user.email.toLowerCase() === email.trim().toLowerCase()) {
+      if (user.email && user.email.trim().toLowerCase() === normalized) {
         return user;
       }
     }

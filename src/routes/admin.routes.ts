@@ -96,6 +96,7 @@ router.post('/users/balance', (req: Request, res: Response): void => {
     createdAt,
   };
   db.notifications.set(notifId, notif);
+  db.saveToDisk();
 
   res.status(200).json({
     success: true,

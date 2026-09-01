@@ -47,7 +47,8 @@ router.post('/', authenticate, (req: AuthenticatedRequest, res: Response): void 
   const user = req.user!;
   const { method, amount, currency, transactionHash, receiptImage, proofImage } = req.body;
 
-  if (!amount || amount <= 0) {
+  const numericAmount = Number(amount);
+  if (!numericAmount || isNaN(numericAmount) || numericAmount <= 0) {
     res.status(400).json({ success: false, message: 'Valid deposit amount is required' });
     return;
   }
@@ -67,7 +68,7 @@ router.post('/', authenticate, (req: AuthenticatedRequest, res: Response): void 
     userName: user.name,
     userEmail: user.email,
     type: 'deposit',
-    amount: Number(amount),
+    amount: numericAmount,
     method: methodName,
     currency: currency || 'USD',
     transactionHash: transactionHash || `0x${Math.random().toString(16).substring(2, 30)}`,
@@ -83,13 +84,14 @@ router.post('/', authenticate, (req: AuthenticatedRequest, res: Response): void 
     id: txId,
     userId: user.id,
     type: 'deposit',
-    amount: Number(amount),
+    amount: numericAmount,
     status: 'pending',
     plan: 'Direct Inflow',
     receiptImage: finalReceiptImage,
     date: createdAt,
   };
   db.transactions.unshift(ledgerItem);
+  db.saveToDisk();
 
   res.status(201).json({
     success: true,

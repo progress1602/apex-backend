@@ -51,7 +51,7 @@ router.post('/', authenticate, (req: AuthenticatedRequest, res: Response): void 
     return;
   }
 
-  user.balance -= invAmount;
+  user.balance = Number((user.balance - invAmount).toFixed(2));
 
   const resolvedPlan = planId ? db.investmentPlans.get(planId) : undefined;
   const finalPlanName = planName || (resolvedPlan ? resolvedPlan.name : 'Apex Starter Tier');
@@ -93,6 +93,7 @@ router.post('/', authenticate, (req: AuthenticatedRequest, res: Response): void 
     date: startDate,
   };
   db.transactions.unshift(ledgerItem);
+  db.saveToDisk();
 
   res.status(201).json({
     success: true,
@@ -127,7 +128,7 @@ router.post('/:id/settle', authenticate, (req: AuthenticatedRequest, res: Respon
   const payoutAmount = inv.projectedReturn || inv.amount * 1.15;
   inv.status = 'settled';
   inv.progress = 100;
-  user.balance += payoutAmount;
+  user.balance = Number((user.balance + payoutAmount).toFixed(2));
 
   const txId = `tx_settle_${Math.floor(10000 + Math.random() * 90000)}`;
 
@@ -142,6 +143,7 @@ router.post('/:id/settle', authenticate, (req: AuthenticatedRequest, res: Respon
     date: new Date().toISOString(),
   };
   db.transactions.unshift(ledgerItem);
+  db.saveToDisk();
 
   res.status(200).json({
     success: true,
