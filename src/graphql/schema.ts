@@ -130,6 +130,24 @@ export const typeDefs = `#graphql
     createdAt: String
   }
 
+  type AdminBalanceAdjustData {
+    userId: String
+    name: String
+    email: String
+    previousBalance: Float
+    newBalance: Float
+    action: String
+    amount: Float
+    reason: String
+    transactionId: String
+  }
+
+  type AdminBalanceAdjustResult {
+    success: Boolean!
+    message: String!
+    data: AdminBalanceAdjustData
+  }
+
   type Query {
     me: User
     userProfile: User
@@ -141,6 +159,7 @@ export const typeDefs = `#graphql
     userInvestments: [UserInvestment]
     transactions(type: String, status: String, page: Int, limit: Int): [TransactionItem]
     notifications: [NotificationItem]
+    adminUsers: [User]
     adminDeposits: [DepositTransaction]
     adminWithdrawals: [WithdrawalResult]
   }
@@ -158,5 +177,6 @@ export const typeDefs = `#graphql
     adminUpdateDepositStatus(id: ID!, status: String!): DepositTransaction
     adminUpdateWithdrawalStatus(id: ID!, status: String!, txHash: String): WithdrawalResult
     adminUpdatePlan(id: ID!, roi: String, minAmount: Float, maxAmount: Float, feeRate: Float): InvestmentPlan
+    adminAdjustUserBalance(email: String!, action: String!, amount: Float!, reason: String): AdminBalanceAdjustResult
   }
 `;

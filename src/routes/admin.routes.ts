@@ -1,7 +1,118 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../store/db';
+import { TransactionLedgerItem, NotificationItem } from '../types';
 
 const router = Router();
+
+// GET /api/v1/admin/users (Admin list all registered users and their balances)
+router.get('/users', (_req: Request, res: Response): void => {
+  const usersList = Array.from(db.users.values()).map((user) => ({
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    tier: user.tier,
+    balance: Number(user.balance.toFixed(2)),
+    phone: user.phone || '',
+    is2FAEnabled: user.is2FAEnabled,
+    createdAt: user.createdAt,
+  }));
+
+  res.status(200).json({
+    success: true,
+    total: usersList.length,
+    users: usersList,
+  });
+});
+
+// POST /api/v1/admin/users/balance (Admin increment/decrement user balance by email)
+router.post('/users/balance', (req: Request, res: Response): void => {
+  const { email, action, amount, reason } = req.body;
+
+  if (!email) {
+    res.status(400).json({ success: false, message: 'User email is required' });
+    return;
+  }
+
+  const user = db.getUserByEmail(email);
+  if (!user) {
+    res.status(404).json({ success: false, message: `User with email '${email}' not found` });
+    return;
+  }
+
+  const numericAmount = Number(amount);
+  if (isNaN(numericAmount) || numericAmount <= 0) {
+    res.status(400).json({ success: false, message: 'Valid positive amount is required' });
+    return;
+  }
+
+  const normalizedAction = (action || '').toLowerCase().trim();
+  const validActions = ['increment', 'add', 'decrement', 'deduct', 'subtract'];
+  if (!validActions.includes(normalizedAction)) {
+    res.status(400).json({
+      success: false,
+      message: "Valid action is required: 'increment' (or 'add') | 'decrement' (or 'deduct')",
+    });
+    return;
+  }
+
+  const previousBalance = user.balance;
+  const isIncrement = normalizedAction === 'increment' || normalizedAction === 'add';
+
+  if (isIncrement) {
+    user.balance = Number((user.balance + numericAmount).toFixed(2));
+  } else {
+    user.balance = Number(Math.max(0, user.balance - numericAmount).toFixed(2));
+  }
+
+  const adjustmentFormatted = isIncrement
+    ? `+$${numericAmount.toFixed(2)}`
+    : `-$${numericAmount.toFixed(2)}`;
+  const finalReason = reason || (isIncrement ? 'Admin Balance Credit' : 'Admin Balance Debit');
+  const txId = `tx_adj_${Math.floor(10000 + Math.random() * 90000)}`;
+  const createdAt = new Date().toISOString();
+
+  // Record ledger entry for the user
+  const ledgerItem: TransactionLedgerItem = {
+    id: txId,
+    userId: user.id,
+    type: isIncrement ? 'deposit' : 'withdrawal',
+    amount: numericAmount,
+    status: 'completed',
+    plan: `${finalReason} (${adjustmentFormatted})`,
+    date: createdAt,
+  };
+  db.transactions.unshift(ledgerItem);
+
+  // Send user alert notification
+  const notifId = `notif_${Math.floor(10000 + Math.random() * 90000)}`;
+  const notif: NotificationItem = {
+    id: notifId,
+    userId: user.id,
+    title: isIncrement ? 'Funds Added to Wallet' : 'Funds Deducted from Wallet',
+    message: `An administrative balance adjustment of ${adjustmentFormatted} USD was applied to your account. New Balance: $${user.balance.toFixed(2)} USD.`,
+    type: isIncrement ? 'deposit' : 'withdrawal',
+    isRead: false,
+    createdAt,
+  };
+  db.notifications.set(notifId, notif);
+
+  res.status(200).json({
+    success: true,
+    message: `User balance ${isIncrement ? 'incremented' : 'decremented'} successfully`,
+    data: {
+      userId: user.id,
+      name: user.name,
+      email: user.email,
+      previousBalance: Number(previousBalance.toFixed(2)),
+      newBalance: Number(user.balance.toFixed(2)),
+      action: isIncrement ? 'increment' : 'decrement',
+      amount: Number(numericAmount.toFixed(2)),
+      reason: finalReason,
+      transactionId: txId,
+    },
+  });
+});
 
 // GET /api/v1/admin/deposits (Admin list all user deposits with receipt proof)
 router.get('/deposits', (_req: Request, res: Response): void => {

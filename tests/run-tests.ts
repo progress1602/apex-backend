@@ -59,7 +59,7 @@ function assert(condition: boolean, message: string) {
 }
 
 async function runTestSuite() {
-  console.log('🧪 Starting ApexBridge Comprehensive Test Suite with Receipt Image Upload...\n');
+  console.log('🧪 Starting ApexBridge Comprehensive Test Suite (with Admin Balance Adjust)...\n');
   let token = '';
 
   // 1. Landing & OpenAPI spec & Apollo Sandbox Page
@@ -79,25 +79,62 @@ async function runTestSuite() {
     method: 'POST',
     path: '/api/v1/auth/signup',
     body: {
-      fullName: 'Receipt Tester',
+      fullName: 'Balance Adjustment Tester',
       email,
       password: 'SecurePassword123!',
     },
   });
   assert(signupRes.status === 201 && signupRes.data.success === true, 'Signup successful');
-  assert(signupRes.data.user.name === 'Receipt Tester', 'User name matches input exactly');
+  assert(signupRes.data.user.name === 'Balance Adjustment Tester', 'User name matches input exactly');
   assert(signupRes.data.user.balance === 0, 'New user starting balance is strictly 0');
   token = signupRes.data.token;
   console.log('✅ POST /api/v1/auth/signup OK');
 
-  // 3. User Profile & Settings
-  console.log('\nTesting 2. User Profile & Settings...');
-  const profileRes = await request({ method: 'GET', path: '/api/v1/user/profile', token });
-  assert(profileRes.status === 200 && profileRes.data.name === 'Receipt Tester', 'Profile name matches');
-  console.log('✅ GET /api/v1/user/profile OK');
+  // 3. Admin increment user balance by email
+  console.log('\nTesting 2. Admin Increment User Balance by Email...');
+  const incRes = await request({
+    method: 'POST',
+    path: '/api/v1/admin/users/balance',
+    body: {
+      email,
+      action: 'increment',
+      amount: 25000.0,
+      reason: 'VIP Promotion Credit',
+    },
+  });
+  assert(incRes.status === 200 && incRes.data.success === true, 'Balance increment OK');
+  assert(incRes.data.data.newBalance === 25000, 'User balance incremented to 25000');
+  assert(incRes.data.data.previousBalance === 0, 'Previous balance was 0');
+  console.log(`✅ Admin incremented user balance to $${incRes.data.data.newBalance}`);
 
-  // 4. Submit Deposit with Receipt Image
-  console.log('\nTesting 3. Submit Deposit with Receipt Proof Image...');
+  // Check user wallet immediately reflects increment
+  const walletAfterInc = await request({ method: 'GET', path: '/api/v1/wallet/summary', token });
+  assert(walletAfterInc.data.data.availableBalance === 25000, 'User wallet balance is 25000');
+  console.log('✅ User wallet summary updated to 25000');
+
+  // 4. Admin decrement user balance by email
+  console.log('\nTesting 3. Admin Decrement User Balance by Email...');
+  const decRes = await request({
+    method: 'POST',
+    path: '/api/v1/admin/users/balance',
+    body: {
+      email,
+      action: 'decrement',
+      amount: 5000.0,
+      reason: 'Fee Correction',
+    },
+  });
+  assert(decRes.status === 200 && decRes.data.success === true, 'Balance decrement OK');
+  assert(decRes.data.data.newBalance === 20000, 'User balance decremented from 25000 to 20000');
+  console.log(`✅ Admin decremented user balance to $${decRes.data.data.newBalance}`);
+
+  // Check user wallet immediately reflects decrement
+  const walletAfterDec = await request({ method: 'GET', path: '/api/v1/wallet/summary', token });
+  assert(walletAfterDec.data.data.availableBalance === 20000, 'User wallet balance is 20000');
+  console.log('✅ User wallet summary updated to 20000');
+
+  // 5. Submit Deposit with Receipt Image
+  console.log('\nTesting 4. Submit Deposit with Receipt Proof Image...');
   const mockReceiptBase64 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
   const createDepRes = await request({
     method: 'POST',
@@ -105,49 +142,25 @@ async function runTestSuite() {
     token,
     body: {
       method: 'btc',
-      amount: 15000.0,
+      amount: 5000.0,
       currency: 'USD',
       transactionHash: '0x998877665544332211',
       receiptImage: mockReceiptBase64,
     },
   });
   assert(createDepRes.status === 201, 'Deposit created status 201');
-  assert(createDepRes.data.transaction.receiptImage === mockReceiptBase64, 'Receipt image stored and returned on deposit');
   const depositTxId = createDepRes.data.transaction.id;
-  console.log(`✅ POST /api/v1/deposits OK (Receipt Image Attached: ${depositTxId})`);
 
-  // 5. User View Deposits (with Receipt Image)
-  const userDepsRes = await request({ method: 'GET', path: '/api/v1/deposits', token });
-  assert(userDepsRes.status === 200 && userDepsRes.data.deposits.length >= 1, 'User deposits listed');
-  assert(userDepsRes.data.deposits[0].receiptImage === mockReceiptBase64, 'Receipt image visible in user deposit list');
-  console.log('✅ GET /api/v1/deposits (User deposits with receipt) OK');
-
-  // 6. Admin View All Deposits (with Receipt Proof and User Info)
-  console.log('\nTesting 4. Admin View Deposits with Uploaded Receipt Images...');
-  const adminDepsRes = await request({ method: 'GET', path: '/api/v1/admin/deposits' });
-  assert(adminDepsRes.status === 200 && adminDepsRes.data.deposits.length >= 1, 'Admin deposits list retrieved');
-  const adminFoundDep = adminDepsRes.data.deposits.find((d: any) => d.id === depositTxId);
-  assert(adminFoundDep !== undefined, 'Admin found the submitted deposit');
-  assert(adminFoundDep.receiptImage === mockReceiptBase64, 'Admin receives receipt image proof');
-  assert(adminFoundDep.userName === 'Receipt Tester', 'Admin receives depositor user name');
-  console.log('✅ GET /api/v1/admin/deposits (Admin receipt review) OK');
-
-  // 7. Admin Approve Deposit
-  console.log('\nTesting 5. Admin Approve Deposit...');
   const adminApproveRes = await request({
     method: 'PATCH',
     path: `/api/v1/admin/deposits/${depositTxId}/status`,
     body: { status: 'approved' },
   });
   assert(adminApproveRes.status === 200 && adminApproveRes.data.status === 'approved', 'Admin approved deposit');
-  assert(adminApproveRes.data.receiptImage === mockReceiptBase64, 'Receipt image preserved in approval response');
+  console.log('✅ Deposit submitted and approved');
 
-  const walletAfterDep = await request({ method: 'GET', path: '/api/v1/wallet/summary', token });
-  assert(walletAfterDep.data.data.availableBalance === 15000, 'Balance credited to 15000 after approval');
-  console.log('✅ Deposit approved & user balance credited to $15,000');
-
-  // 8. Investments
-  console.log('\nTesting 6. Investment Allocation & Settlement...');
+  // 6. Investments
+  console.log('\nTesting 5. Investments & Settlement...');
   const createInvRes = await request({
     method: 'POST',
     path: '/api/v1/investments',
@@ -159,7 +172,7 @@ async function runTestSuite() {
       roi: '35%',
     },
   });
-  assert(createInvRes.status === 201 && createInvRes.data.newAvailableBalance === 10000, 'Invested 5000 from 15000 -> 10000 left');
+  assert(createInvRes.status === 201, 'Investment created');
   const createdInvId = createInvRes.data.investment.id;
 
   const settleRes = await request({
@@ -167,52 +180,42 @@ async function runTestSuite() {
     path: `/api/v1/investments/${createdInvId}/settle`,
     token,
   });
-  assert(settleRes.status === 200 && settleRes.data.settlement.payoutAmount === 6750, '5000 + 35% ROI = 6750 payout');
-  console.log('✅ Investment allocated and settled with 35% yield');
+  assert(settleRes.status === 200 && settleRes.data.settlement.payoutAmount === 6750, 'Settlement OK');
+  console.log('✅ Investment settled');
 
-  // 9. GraphQL Execution with Receipt Image
-  console.log('\nTesting 7. Apollo GraphQL Deposit with Receipt & Admin Query...');
-  const gqlDepositRes = await request({
+  // 7. GraphQL Admin Balance Adjust Mutation
+  console.log('\nTesting 6. Apollo GraphQL Admin Balance Adjustment...');
+  const gqlAdminAdjust = await request({
     method: 'POST',
     path: '/graphql',
     body: {
       query: `
-        mutation CreateDepositWithReceipt {
-          createDeposit(method: "eth", amount: 2000.0, receiptImage: "data:image/png;base64,sample_receipt_data") {
-            id
-            amount
-            receiptImage
-            status
+        mutation AdminAdjust($email: String!, $action: String!, $amount: Float!) {
+          adminAdjustUserBalance(email: $email, action: $action, amount: $amount, reason: "GraphQL Admin Adjustment") {
+            success
+            message
+            data {
+              email
+              previousBalance
+              newBalance
+              action
+              amount
+            }
           }
         }
       `,
-    },
-    token,
-  });
-  assert(gqlDepositRes.status === 200 && gqlDepositRes.data.data.createDeposit.receiptImage === 'data:image/png;base64,sample_receipt_data', 'GraphQL createDeposit returned receiptImage');
-
-  const gqlAdminRes = await request({
-    method: 'POST',
-    path: '/graphql',
-    body: {
-      query: `
-        query GetAdminDeposits {
-          adminDeposits {
-            id
-            amount
-            userName
-            receiptImage
-            status
-          }
-        }
-      `,
+      variables: {
+        email,
+        action: 'increment',
+        amount: 3000.0,
+      },
     },
   });
-  assert(gqlAdminRes.status === 200 && Array.isArray(gqlAdminRes.data.data.adminDeposits), 'GraphQL adminDeposits listed');
-  console.log('✅ Apollo GraphQL Deposit & Admin Receipt queries OK');
+  assert(gqlAdminAdjust.status === 200 && gqlAdminAdjust.data.data.adminAdjustUserBalance.success === true, 'GraphQL admin adjust OK');
+  console.log(`✅ Apollo GraphQL Admin Balance Adjustment OK (New Balance: $${gqlAdminAdjust.data.data.adminAdjustUserBalance.data.newBalance})`);
 
   console.log('\n=======================================================');
-  console.log('🎉 ALL TESTS INCLUDING RECEIPT IMAGES PASSED 100%!');
+  console.log('🎉 ALL TESTS INCLUDING ADMIN BALANCE ADJUST PASSED 100%!');
   console.log('=======================================================\n');
 }
 

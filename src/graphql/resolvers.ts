@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { db } from '../store/db';
 import { generateToken } from '../middleware/auth';
-import { User, DepositTransaction, UserInvestment, WithdrawalTransaction } from '../types';
+import { User, DepositTransaction, UserInvestment, WithdrawalTransaction, TransactionLedgerItem, NotificationItem } from '../types';
 
 export const resolvers = {
   User: {
@@ -86,6 +86,9 @@ export const resolvers = {
     notifications: (_: any, __: any, context: { user?: User }) => {
       if (!context.user) throw new Error('Unauthorized: Missing or invalid token');
       return Array.from(db.notifications.values()).filter((n) => n.userId === context.user!.id);
+    },
+    adminUsers: () => {
+      return Array.from(db.users.values());
     },
     adminDeposits: () => {
       return Array.from(db.depositTransactions.values()).map((dep) => {
@@ -369,6 +372,79 @@ export const resolvers = {
         if (feeRate !== undefined) plan.feeRate = feeRate;
       }
       return plan;
+    },
+
+    adminAdjustUserBalance: (
+      _: any,
+      { email, action, amount, reason }: { email: string; action: string; amount: number; reason?: string }
+    ) => {
+      const user = db.getUserByEmail(email);
+      if (!user) {
+        throw new Error(`User with email '${email}' not found`);
+      }
+
+      const numericAmount = Number(amount);
+      if (isNaN(numericAmount) || numericAmount <= 0) {
+        throw new Error('Valid positive amount is required');
+      }
+
+      const normalizedAction = (action || '').toLowerCase().trim();
+      const isIncrement = normalizedAction === 'increment' || normalizedAction === 'add';
+      const previousBalance = user.balance;
+
+      if (isIncrement) {
+        user.balance = Number((user.balance + numericAmount).toFixed(2));
+      } else {
+        user.balance = Number(Math.max(0, user.balance - numericAmount).toFixed(2));
+      }
+
+      const adjustmentFormatted = isIncrement
+        ? `+$${numericAmount.toFixed(2)}`
+        : `-$${numericAmount.toFixed(2)}`;
+      const finalReason = reason || (isIncrement ? 'Admin Balance Credit' : 'Admin Balance Debit');
+      const txId = `tx_adj_${Math.floor(10000 + Math.random() * 90000)}`;
+      const createdAt = new Date().toISOString();
+
+      // Record in transactions ledger
+      const ledgerItem: TransactionLedgerItem = {
+        id: txId,
+        userId: user.id,
+        type: isIncrement ? 'deposit' : 'withdrawal',
+        amount: numericAmount,
+        status: 'completed',
+        plan: `${finalReason} (${adjustmentFormatted})`,
+        date: createdAt,
+      };
+      db.transactions.unshift(ledgerItem);
+
+      // Record notification
+      const notifId = `notif_${Math.floor(10000 + Math.random() * 90000)}`;
+      const notif: NotificationItem = {
+        id: notifId,
+        userId: user.id,
+        title: isIncrement ? 'Funds Added to Wallet' : 'Funds Deducted from Wallet',
+        message: `An administrative balance adjustment of ${adjustmentFormatted} USD was applied to your account. New Balance: $${user.balance.toFixed(2)} USD.`,
+        type: isIncrement ? 'deposit' : 'withdrawal',
+        isRead: false,
+        createdAt,
+      };
+      db.notifications.set(notifId, notif);
+
+      return {
+        success: true,
+        message: `User balance ${isIncrement ? 'incremented' : 'decremented'} successfully`,
+        data: {
+          userId: user.id,
+          name: user.name,
+          email: user.email,
+          previousBalance: Number(previousBalance.toFixed(2)),
+          newBalance: Number(user.balance.toFixed(2)),
+          action: isIncrement ? 'increment' : 'decrement',
+          amount: Number(numericAmount.toFixed(2)),
+          reason: finalReason,
+          transactionId: txId,
+        },
+      };
     },
   },
 };

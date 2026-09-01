@@ -977,6 +977,85 @@
           }
         }
       }
+    },
+    "/api/v1/admin/users": {
+      "get": {
+        "summary": "Admin view all registered users and their balances",
+        "tags": ["9. Administrative & Back-Office Operations"],
+        "responses": {
+          "200": {
+            "description": "List of all registered users",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "total": { "type": "integer", "example": 3 },
+                    "users": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/User" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/users/balance": {
+      "post": {
+        "summary": "Admin increment or decrement a user's wallet balance by email",
+        "tags": ["9. Administrative & Back-Office Operations"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["email", "action", "amount"],
+                "properties": {
+                  "email": { "type": "string", "example": "jane@example.com" },
+                  "action": { "type": "string", "enum": ["increment", "decrement", "add", "deduct"], "example": "increment" },
+                  "amount": { "type": "number", "example": 500.00 },
+                  "reason": { "type": "string", "example": "Loyalty Bonus Credit" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "User balance adjusted successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "message": { "type": "string", "example": "User balance incremented successfully" },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "userId": { "type": "string", "example": "usr_8829104" },
+                        "name": { "type": "string", "example": "Jane Doe" },
+                        "email": { "type": "string", "example": "jane@example.com" },
+                        "previousBalance": { "type": "number", "example": 1000.00 },
+                        "newBalance": { "type": "number", "example": 1500.00 },
+                        "action": { "type": "string", "example": "increment" },
+                        "amount": { "type": "number", "example": 500.00 },
+                        "reason": { "type": "string", "example": "Loyalty Bonus Credit" },
+                        "transactionId": { "type": "string", "example": "tx_adj_48192" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   }
 }
