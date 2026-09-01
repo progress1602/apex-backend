@@ -1,6 +1,9 @@
 import { Router, Request, Response } from 'express';
+import bcrypt from 'bcryptjs';
 import { db } from '../store/db';
-import { TransactionLedgerItem, NotificationItem } from '../types';
+import { requireAdmin, AuthenticatedRequest } from '../middleware/auth';
+import { TransactionLedgerItem, NotificationItem, User } from '../types';
+import { UserModel, DepositModel, WithdrawalModel, TransactionModel, NotificationModel } from '../models';
 
 const router = Router();
 
@@ -15,6 +18,7 @@ router.get('/users', (_req: Request, res: Response): void => {
     balance: Number(user.balance.toFixed(2)),
     phone: user.phone || '',
     is2FAEnabled: user.is2FAEnabled,
+    permissions: user.permissions || [],
     createdAt: user.createdAt,
   }));
 
@@ -25,8 +29,104 @@ router.get('/users', (_req: Request, res: Response): void => {
   });
 });
 
+// GET /api/v1/admin/sub-admins (List all sub-admins and admins)
+router.get('/sub-admins', requireAdmin, (_req: AuthenticatedRequest, res: Response): void => {
+  const subAdmins = Array.from(db.users.values())
+    .filter((u) => u.role === 'admin' || u.role === 'sub-admin')
+    .map((u) => ({
+      id: u.id,
+      name: u.name,
+      email: u.email,
+      role: u.role,
+      permissions: u.permissions || ['all'],
+      createdAt: u.createdAt,
+    }));
+
+  res.status(200).json({
+    success: true,
+    total: subAdmins.length,
+    subAdmins,
+  });
+});
+
+// POST /api/v1/admin/sub-admins (ONLY an Admin can create sub-admins)
+router.post('/sub-admins', requireAdmin, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const { fullName, name, email, password, permissions, role } = req.body;
+
+  if (!email || !password) {
+    res.status(400).json({ success: false, message: 'Email and password are required to create a sub-admin' });
+    return;
+  }
+
+  const cleanEmail = String(email).trim().toLowerCase();
+  const cleanPassword = String(password).trim();
+
+  const existingUser = db.getUserByEmail(cleanEmail);
+  if (existingUser) {
+    res.status(409).json({ success: false, message: `An account with email '${cleanEmail}' already exists` });
+    return;
+  }
+
+  const salt = bcrypt.genSaltSync(10);
+  const passwordHash = bcrypt.hashSync(cleanPassword, salt);
+  const subAdminId = `usr_subadmin_${Math.floor(10000 + Math.random() * 90000)}`;
+  const subAdminRole = role === 'admin' ? 'admin' : 'sub-admin';
+  const assignedPermissions = Array.isArray(permissions) && permissions.length > 0
+    ? permissions
+    : ['deposits', 'withdrawals', 'balance_adjust'];
+
+  const newSubAdmin: User = {
+    id: subAdminId,
+    name: (fullName || name || cleanEmail.split('@')[0] || 'Sub Admin').trim(),
+    email: cleanEmail,
+    passwordHash,
+    role: subAdminRole,
+    tier: 'Admin Staff Core',
+    balance: 0.0,
+    phone: '',
+    is2FAEnabled: false,
+    currencyPreference: 'USD',
+    notifications: { email: true, sms: false, yieldAlerts: true },
+    permissions: assignedPermissions,
+    createdAt: new Date().toISOString(),
+  };
+
+  // Save to in-memory store & disk
+  db.users.set(newSubAdmin.id, newSubAdmin);
+  db.saveToDisk();
+
+  // Save to MongoDB Mongoose Model
+  try {
+    await UserModel.create({
+      userId: newSubAdmin.id,
+      name: newSubAdmin.name,
+      email: newSubAdmin.email,
+      passwordHash: newSubAdmin.passwordHash,
+      role: newSubAdmin.role,
+      tier: newSubAdmin.tier,
+      balance: newSubAdmin.balance,
+      permissions: newSubAdmin.permissions,
+    });
+  } catch (err) {
+    console.error('Mongoose sub-admin creation sync error:', err);
+  }
+
+  res.status(201).json({
+    success: true,
+    message: 'Sub-admin created successfully by Admin',
+    subAdmin: {
+      id: newSubAdmin.id,
+      name: newSubAdmin.name,
+      email: newSubAdmin.email,
+      role: newSubAdmin.role,
+      permissions: newSubAdmin.permissions,
+      createdAt: newSubAdmin.createdAt,
+    },
+  });
+});
+
 // POST /api/v1/admin/users/balance (Admin increment/decrement user balance by email)
-router.post('/users/balance', (req: Request, res: Response): void => {
+router.post('/users/balance', async (req: Request, res: Response): Promise<void> => {
   const { email, action, amount, reason } = req.body;
 
   if (!email) {
@@ -72,7 +172,7 @@ router.post('/users/balance', (req: Request, res: Response): void => {
   const txId = `tx_adj_${Math.floor(10000 + Math.random() * 90000)}`;
   const createdAt = new Date().toISOString();
 
-  // Record ledger entry for the user
+  // Record ledger entry
   const ledgerItem: TransactionLedgerItem = {
     id: txId,
     userId: user.id,
@@ -97,6 +197,30 @@ router.post('/users/balance', (req: Request, res: Response): void => {
   };
   db.notifications.set(notifId, notif);
   db.saveToDisk();
+
+  // Sync to MongoDB Mongoose Models
+  try {
+    await UserModel.findOneAndUpdate({ userId: user.id }, { balance: user.balance });
+    await TransactionModel.create({
+      transactionId: txId,
+      userId: user.id,
+      type: ledgerItem.type,
+      amount: ledgerItem.amount,
+      status: ledgerItem.status,
+      plan: ledgerItem.plan,
+      date: ledgerItem.date,
+    });
+    await NotificationModel.create({
+      notificationId: notifId,
+      userId: user.id,
+      title: notif.title,
+      message: notif.message,
+      type: notif.type,
+      isRead: false,
+    });
+  } catch (err) {
+    console.error('Mongoose balance sync error:', err);
+  }
 
   res.status(200).json({
     success: true,
@@ -173,7 +297,7 @@ router.get('/deposits/:id', (req: Request, res: Response): void => {
 });
 
 // PATCH /api/v1/admin/deposits/:id/status
-router.patch('/deposits/:id/status', (req: Request, res: Response): void => {
+router.patch('/deposits/:id/status', async (req: Request, res: Response): Promise<void> => {
   const id = req.params.id as string;
   const { status } = req.body;
 
@@ -195,7 +319,8 @@ router.patch('/deposits/:id/status', (req: Request, res: Response): void => {
     if (prevStatus !== 'approved' && deposit.status === 'approved') {
       const user = db.users.get(deposit.userId);
       if (user) {
-        user.balance += deposit.amount;
+        user.balance = Number((user.balance + deposit.amount).toFixed(2));
+        UserModel.findOneAndUpdate({ userId: user.id }, { balance: user.balance }).catch(() => {});
       }
     }
 
@@ -204,16 +329,11 @@ router.patch('/deposits/:id/status', (req: Request, res: Response): void => {
     if (ledger) {
       ledger.status = deposit.status;
     }
+
+    DepositModel.findOneAndUpdate({ depositId: id }, { status: deposit.status }).catch(() => {});
   }
 
-  // Also check direct ledger if deposit transaction wasn't in map
-  const directLedger = db.transactions.find((tx) => tx.id === id && tx.type === 'deposit');
-  if (directLedger) {
-    directLedger.status = status.toLowerCase() as 'pending' | 'approved' | 'rejected';
-    if (!receiptImage && directLedger.receiptImage) {
-      receiptImage = directLedger.receiptImage;
-    }
-  }
+  db.saveToDisk();
 
   res.status(200).json({
     success: true,
@@ -243,7 +363,7 @@ router.get('/withdrawals', (_req: Request, res: Response): void => {
 });
 
 // PATCH /api/v1/admin/withdrawals/:id/status
-router.patch('/withdrawals/:id/status', (req: Request, res: Response): void => {
+router.patch('/withdrawals/:id/status', async (req: Request, res: Response): Promise<void> => {
   const id = req.params.id as string;
   const { status, txHash } = req.body;
 
@@ -264,7 +384,8 @@ router.patch('/withdrawals/:id/status', (req: Request, res: Response): void => {
     if (withdrawal.status === 'rejected') {
       const user = db.users.get(withdrawal.userId);
       if (user) {
-        user.balance += withdrawal.amount;
+        user.balance = Number((user.balance + withdrawal.amount).toFixed(2));
+        UserModel.findOneAndUpdate({ userId: user.id }, { balance: user.balance }).catch(() => {});
       }
     }
 
@@ -273,12 +394,11 @@ router.patch('/withdrawals/:id/status', (req: Request, res: Response): void => {
     if (ledger) {
       ledger.status = withdrawal.status;
     }
+
+    WithdrawalModel.findOneAndUpdate({ withdrawalId: id }, { status: withdrawal.status, txHash: withdrawal.txHash }).catch(() => {});
   }
 
-  const directLedger = db.transactions.find((tx) => tx.id === id && tx.type === 'withdrawal');
-  if (directLedger) {
-    directLedger.status = status.toLowerCase() as any;
-  }
+  db.saveToDisk();
 
   res.status(200).json({
     success: true,

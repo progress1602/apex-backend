@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { db } from '../store/db';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth';
 import { WithdrawalTransaction, TransactionLedgerItem } from '../types';
+import { UserModel, WithdrawalModel, TransactionModel } from '../models';
 
 const router = Router();
 
@@ -33,7 +34,7 @@ router.post('/', authenticate, (req: AuthenticatedRequest, res: Response): void 
   }
 
   // Deduct balance
-  user.balance -= wdrAmount;
+  user.balance = Number((user.balance - wdrAmount).toFixed(2));
 
   const txId = `tx_wdr_${Math.floor(10000 + Math.random() * 90000)}`;
   const createdAt = new Date().toISOString();
@@ -65,6 +66,32 @@ router.post('/', authenticate, (req: AuthenticatedRequest, res: Response): void 
     date: createdAt,
   };
   db.transactions.unshift(ledgerItem);
+  db.saveToDisk();
+
+  try {
+    UserModel.findOneAndUpdate({ userId: user.id }, { balance: user.balance }).catch(() => {});
+    WithdrawalModel.create({
+      withdrawalId: txId,
+      userId: user.id,
+      userName: user.name,
+      userEmail: user.email,
+      type: 'withdrawal',
+      amount: wdrAmount,
+      fee,
+      netPayout,
+      method: withdrawal.method,
+      destinationAddress,
+      status: 'pending',
+    }).catch(() => {});
+    TransactionModel.create({
+      transactionId: txId,
+      userId: user.id,
+      type: 'withdrawal',
+      amount: wdrAmount,
+      status: 'pending',
+      plan: 'External Payout',
+    }).catch(() => {});
+  } catch {}
 
   res.status(201).json({
     success: true,

@@ -14,6 +14,7 @@ import transactionRoutes from './routes/transaction.routes';
 import notificationRoutes from './routes/notification.routes';
 import adminRoutes from './routes/admin.routes';
 import { setupApolloServer } from './graphql/apollo';
+import { connectDatabase } from './config/database';
 
 export const app = express();
 
@@ -134,8 +135,9 @@ app.use('/api/v1/transactions', transactionRoutes);
 app.use('/api/v1/notifications', notificationRoutes);
 app.use('/api/v1/admin', adminRoutes);
 
-// Setup Apollo Server on app
+// Setup database & Apollo Server on app
 export async function initializeApp() {
+  await connectDatabase();
   await setupApolloServer(app);
   return app;
 }

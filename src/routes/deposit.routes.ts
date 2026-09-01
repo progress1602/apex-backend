@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { db } from '../store/db';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth';
 import { DepositTransaction, TransactionLedgerItem } from '../types';
+import { DepositModel, TransactionModel } from '../models';
 
 const router = Router();
 
@@ -92,6 +93,32 @@ router.post('/', authenticate, (req: AuthenticatedRequest, res: Response): void 
   };
   db.transactions.unshift(ledgerItem);
   db.saveToDisk();
+
+  try {
+    DepositModel.create({
+      depositId: txId,
+      userId: user.id,
+      userName: user.name,
+      userEmail: user.email,
+      type: 'deposit',
+      amount: numericAmount,
+      method: methodName,
+      currency: currency || 'USD',
+      transactionHash: depositTx.transactionHash,
+      receiptImage: finalReceiptImage,
+      status: 'pending',
+    }).catch(() => {});
+
+    TransactionModel.create({
+      transactionId: txId,
+      userId: user.id,
+      type: 'deposit',
+      amount: numericAmount,
+      status: 'pending',
+      plan: 'Direct Inflow',
+      receiptImage: finalReceiptImage,
+    }).catch(() => {});
+  } catch {}
 
   res.status(201).json({
     success: true,

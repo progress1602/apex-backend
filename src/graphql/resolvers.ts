@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 import { db } from '../store/db';
 import { generateToken } from '../middleware/auth';
 import { User, DepositTransaction, UserInvestment, WithdrawalTransaction, TransactionLedgerItem, NotificationItem } from '../types';
+import { UserModel } from '../models';
 
 export const resolvers = {
   User: {
@@ -16,6 +17,7 @@ export const resolvers = {
     is2FAEnabled: (parent: any) => Boolean(parent.is2FAEnabled),
     currencyPreference: (parent: any) => parent.currencyPreference || 'USD',
     notifications: (parent: any) => parent.notifications || { email: true, sms: false, yieldAlerts: false },
+    permissions: (parent: any) => parent.permissions || [],
     createdAt: (parent: any) => parent.createdAt || new Date().toISOString(),
   },
 
@@ -89,6 +91,9 @@ export const resolvers = {
     },
     adminUsers: () => {
       return Array.from(db.users.values());
+    },
+    subAdmins: () => {
+      return Array.from(db.users.values()).filter((u) => u.role === 'admin' || u.role === 'sub-admin');
     },
     adminDeposits: () => {
       return Array.from(db.depositTransactions.values()).map((dep) => {
@@ -452,6 +457,67 @@ export const resolvers = {
           transactionId: txId,
         },
       };
+    },
+
+    createSubAdmin: async (
+      _: any,
+      { fullName, email, password, permissions, role }: any,
+      context: { user?: User }
+    ) => {
+      if (!context.user || context.user.role !== 'admin') {
+        throw new Error('Forbidden: Only an admin can create sub-admins');
+      }
+
+      const cleanEmail = String(email).trim().toLowerCase();
+      const cleanPassword = String(password).trim();
+      const existing = db.getUserByEmail(cleanEmail);
+      if (existing) {
+        throw new Error(`An account with email '${cleanEmail}' already exists`);
+      }
+
+      const salt = bcrypt.genSaltSync(10);
+      const passwordHash = bcrypt.hashSync(cleanPassword, salt);
+      const subAdminId = `usr_subadmin_${Math.floor(10000 + Math.random() * 90000)}`;
+      const subAdminRole = role === 'admin' ? 'admin' : 'sub-admin';
+      const assignedPermissions = Array.isArray(permissions) && permissions.length > 0
+        ? permissions
+        : ['deposits', 'withdrawals', 'balance_adjust'];
+
+      const newSubAdmin: User = {
+        id: subAdminId,
+        name: (fullName || cleanEmail.split('@')[0] || 'Sub Admin').trim(),
+        email: cleanEmail,
+        passwordHash,
+        role: subAdminRole,
+        tier: 'Admin Staff Core',
+        balance: 0.0,
+        phone: '',
+        is2FAEnabled: false,
+        currencyPreference: 'USD',
+        notifications: { email: true, sms: false, yieldAlerts: true },
+        permissions: assignedPermissions,
+        createdAt: new Date().toISOString(),
+      };
+
+      db.users.set(newSubAdmin.id, newSubAdmin);
+      db.saveToDisk();
+
+      try {
+        await UserModel.create({
+          userId: newSubAdmin.id,
+          name: newSubAdmin.name,
+          email: newSubAdmin.email,
+          passwordHash: newSubAdmin.passwordHash,
+          role: newSubAdmin.role,
+          tier: newSubAdmin.tier,
+          balance: newSubAdmin.balance,
+          permissions: newSubAdmin.permissions,
+        });
+      } catch (err) {
+        console.error('Mongoose sub-admin creation sync error:', err);
+      }
+
+      return newSubAdmin;
     },
   },
 };

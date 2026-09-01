@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { db } from '../store/db';
 import { generateToken, authenticate, AuthenticatedRequest } from '../middleware/auth';
 import { User } from '../types';
+import { UserModel } from '../models';
 
 const router = Router();
 
@@ -55,6 +56,22 @@ router.post('/signup', (req: Request, res: Response): void => {
 
   db.users.set(newUser.id, newUser);
   db.saveToDisk();
+
+  try {
+    UserModel.create({
+      userId: newUser.id,
+      name: newUser.name,
+      email: newUser.email,
+      passwordHash: newUser.passwordHash,
+      role: newUser.role,
+      tier: newUser.tier,
+      balance: newUser.balance,
+      phone: newUser.phone,
+      is2FAEnabled: newUser.is2FAEnabled,
+      currencyPreference: newUser.currencyPreference,
+      notifications: newUser.notifications,
+    }).catch((e) => console.error('Mongoose UserModel create error:', e));
+  } catch {}
 
   const token = generateToken(newUser);
 

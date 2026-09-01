@@ -1056,6 +1056,102 @@
           }
         }
       }
+    },
+    "/api/v1/admin/sub-admins": {
+      "get": {
+        "summary": "Admin view all sub-admin and administrator accounts",
+        "tags": ["9. Administrative & Back-Office Operations"],
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "List of sub-admins",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "total": { "type": "integer", "example": 2 },
+                    "subAdmins": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": { "type": "string", "example": "usr_subadmin_44102" },
+                          "name": { "type": "string", "example": "Operations Manager" },
+                          "email": { "type": "string", "example": "ops@apexbridge.com" },
+                          "role": { "type": "string", "example": "sub-admin" },
+                          "permissions": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "example": ["deposits", "withdrawals", "balance_adjust"]
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a new sub-admin account (Admin Only)",
+        "tags": ["9. Administrative & Back-Office Operations"],
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["email", "password"],
+                "properties": {
+                  "fullName": { "type": "string", "example": "Operations Manager" },
+                  "email": { "type": "string", "example": "ops@apexbridge.com" },
+                  "password": { "type": "string", "example": "SecureSubAdmin123!" },
+                  "role": { "type": "string", "enum": ["sub-admin", "admin"], "default": "sub-admin" },
+                  "permissions": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "example": ["deposits", "withdrawals", "balance_adjust"]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Sub-admin created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "message": { "type": "string", "example": "Sub-admin created successfully by Admin" },
+                    "subAdmin": {
+                      "type": "object",
+                      "properties": {
+                        "id": { "type": "string", "example": "usr_subadmin_44102" },
+                        "name": { "type": "string", "example": "Operations Manager" },
+                        "email": { "type": "string", "example": "ops@apexbridge.com" },
+                        "role": { "type": "string", "example": "sub-admin" },
+                        "permissions": { "type": "array", "items": { "type": "string" } }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden: Only an Admin can create sub-admins"
+          }
+        }
+      }
     }
   }
 }

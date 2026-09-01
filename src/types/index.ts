@@ -3,7 +3,7 @@ export interface User {
   name: string;
   email: string;
   passwordHash: string;
-  role: 'investor' | 'admin';
+  role: 'investor' | 'admin' | 'sub-admin';
   tier: string;
   avatar?: string;
   balance: number;
@@ -15,6 +15,7 @@ export interface User {
     sms: boolean;
     yieldAlerts: boolean;
   };
+  permissions?: string[];
   createdAt: string;
 }
 

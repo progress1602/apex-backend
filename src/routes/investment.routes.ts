@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { db } from '../store/db';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth';
 import { UserInvestment, TransactionLedgerItem } from '../types';
+import { UserModel, InvestmentModel, TransactionModel } from '../models';
 
 const router = Router();
 
@@ -95,6 +96,31 @@ router.post('/', authenticate, (req: AuthenticatedRequest, res: Response): void 
   db.transactions.unshift(ledgerItem);
   db.saveToDisk();
 
+  try {
+    UserModel.findOneAndUpdate({ userId: user.id }, { balance: user.balance }).catch(() => {});
+    InvestmentModel.create({
+      investmentId: invId,
+      userId: user.id,
+      planId: newInvestment.planId,
+      planName: newInvestment.planName,
+      amount: invAmount,
+      roi: newInvestment.roi,
+      progress: 0,
+      projectedReturn,
+      status: 'active',
+      startDate: new Date(startDate),
+      maturityDate: maturityDateObj,
+    }).catch(() => {});
+    TransactionModel.create({
+      transactionId: ledgerItem.id,
+      userId: user.id,
+      type: 'investment',
+      amount: invAmount,
+      status: 'approved',
+      plan: finalPlanName,
+    }).catch(() => {});
+  } catch {}
+
   res.status(201).json({
     success: true,
     investment: {
@@ -144,6 +170,19 @@ router.post('/:id/settle', authenticate, (req: AuthenticatedRequest, res: Respon
   };
   db.transactions.unshift(ledgerItem);
   db.saveToDisk();
+
+  try {
+    UserModel.findOneAndUpdate({ userId: user.id }, { balance: user.balance }).catch(() => {});
+    InvestmentModel.findOneAndUpdate({ investmentId: id }, { status: 'settled', progress: 100 }).catch(() => {});
+    TransactionModel.create({
+      transactionId: txId,
+      userId: user.id,
+      type: 'investment',
+      amount: payoutAmount,
+      status: 'completed',
+      plan: `${inv.planName} Settlement`,
+    }).catch(() => {});
+  } catch {}
 
   res.status(200).json({
     success: true,

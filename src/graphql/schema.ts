@@ -17,6 +17,7 @@ export const typeDefs = `#graphql
     is2FAEnabled: Boolean
     currencyPreference: String
     notifications: UserNotifications
+    permissions: [String]
     createdAt: String
   }
 
@@ -160,6 +161,7 @@ export const typeDefs = `#graphql
     transactions(type: String, status: String, page: Int, limit: Int): [TransactionItem]
     notifications: [NotificationItem]
     adminUsers: [User]
+    subAdmins: [User]
     adminDeposits: [DepositTransaction]
     adminWithdrawals: [WithdrawalResult]
   }
@@ -178,5 +180,6 @@ export const typeDefs = `#graphql
     adminUpdateWithdrawalStatus(id: ID!, status: String!, txHash: String): WithdrawalResult
     adminUpdatePlan(id: ID!, roi: String, minAmount: Float, maxAmount: Float, feeRate: Float): InvestmentPlan
     adminAdjustUserBalance(email: String!, action: String!, amount: Float!, reason: String): AdminBalanceAdjustResult
+    createSubAdmin(fullName: String, email: String!, password: String!, permissions: [String], role: String): User
   }
 `;

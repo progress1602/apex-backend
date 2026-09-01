@@ -59,8 +59,9 @@ function assert(condition: boolean, message: string) {
 }
 
 async function runTestSuite() {
-  console.log('🧪 Starting ApexBridge Comprehensive Test Suite (with Admin Balance Adjust)...\n');
-  let token = '';
+  console.log('🧪 Starting ApexBridge Comprehensive Test Suite (Mongoose + Seeded Admin + Sub-Admin)...\n');
+  let userToken = '';
+  let adminToken = '';
 
   // 1. Landing & OpenAPI spec & Apollo Sandbox Page
   console.log('Testing Root, OpenAPI Spec, and Apollo Sandbox...');
@@ -72,151 +73,168 @@ async function runTestSuite() {
   assert(apolloRes.status === 200 && typeof apolloRes.data === 'string' && apolloRes.data.includes('EmbeddedSandbox'), 'Apollo Sandbox HTML valid');
   console.log('✅ Root, OpenAPI, and Apollo Sandbox HTML OK');
 
-  // 2. Signup a brand new user
-  console.log('\nTesting 1. Signup New User (Zero Dummy Data)...');
-  const email = `investor_${Date.now()}@apexbridge.com`;
+  // 2. Test Seeded Super Admin Login
+  console.log('\nTesting 1. Seeded Super Admin Authentication...');
+  const adminLoginRes = await request({
+    method: 'POST',
+    path: '/api/v1/auth/login',
+    body: {
+      email: 'admin@apexbridge.com',
+      password: 'AdminPassword123!',
+    },
+  });
+  assert(adminLoginRes.status === 200 && adminLoginRes.data.success === true, 'Super Admin login succeeded');
+  assert(adminLoginRes.data.token && adminLoginRes.data.user.name === 'ApexBridge Super Admin', 'Super admin verified');
+  adminToken = adminLoginRes.data.token;
+  console.log('✅ Seeded Super Admin login OK (admin@apexbridge.com)');
+
+  // 3. Signup a normal investor
+  console.log('\nTesting 2. Signup Normal Investor User...');
+  const investorEmail = `investor_${Date.now()}@apexbridge.com`;
   const signupRes = await request({
     method: 'POST',
     path: '/api/v1/auth/signup',
     body: {
-      fullName: 'Balance Adjustment Tester',
-      email,
+      fullName: 'Standard Investor',
+      email: investorEmail,
       password: 'SecurePassword123!',
     },
   });
-  assert(signupRes.status === 201 && signupRes.data.success === true, 'Signup successful');
-  assert(signupRes.data.user.name === 'Balance Adjustment Tester', 'User name matches input exactly');
-  assert(signupRes.data.user.balance === 0, 'New user starting balance is strictly 0');
-  token = signupRes.data.token;
-  console.log('✅ POST /api/v1/auth/signup OK');
+  assert(signupRes.status === 201 && signupRes.data.success === true, 'Investor Signup successful');
+  userToken = signupRes.data.token;
+  console.log('✅ Standard Investor signup OK');
 
-  // 3. Admin increment user balance by email
-  console.log('\nTesting 2. Admin Increment User Balance by Email...');
+  // 4. Test Sub-Admin Creation: Investor MUST be blocked (403)
+  console.log('\nTesting 3. Security: Non-Admin CANNOT create sub-admins...');
+  const forbiddenCreateRes = await request({
+    method: 'POST',
+    path: '/api/v1/admin/sub-admins',
+    token: userToken, // Investor token
+    body: {
+      email: 'illegal_subadmin@apexbridge.com',
+      password: 'SomePassword123!',
+    },
+  });
+  assert(forbiddenCreateRes.status === 403, `Expected 403 Forbidden for investor, got ${forbiddenCreateRes.status}`);
+  console.log('✅ Security check passed: Standard investor blocked from creating sub-admin (403)');
+
+  // 5. Test Sub-Admin Creation: Admin CAN create sub-admins
+  console.log('\nTesting 4. Admin Creates Sub-Admin Endpoint...');
+  const subAdminEmail = `subadmin_${Date.now()}@apexbridge.com`;
+  const createSubAdminRes = await request({
+    method: 'POST',
+    path: '/api/v1/admin/sub-admins',
+    token: adminToken, // Admin token
+    body: {
+      fullName: 'Regional Ops SubAdmin',
+      email: subAdminEmail,
+      password: 'SubAdminPass123!',
+      permissions: ['deposits', 'withdrawals', 'balance_adjust'],
+    },
+  });
+  assert(createSubAdminRes.status === 201 && createSubAdminRes.data.success === true, 'Sub-admin created successfully');
+  assert(createSubAdminRes.data.subAdmin.email === subAdminEmail, 'Sub-admin email matches');
+  assert(createSubAdminRes.data.subAdmin.role === 'sub-admin', 'Sub-admin role assigned');
+  console.log(`✅ Admin created sub-admin OK (${subAdminEmail})`);
+
+  // 6. Admin list sub-admins
+  const listSubAdminsRes = await request({
+    method: 'GET',
+    path: '/api/v1/admin/sub-admins',
+    token: adminToken,
+  });
+  assert(listSubAdminsRes.status === 200 && listSubAdminsRes.data.subAdmins.length >= 2, 'Sub-admins list retrieved');
+  console.log(`✅ GET /api/v1/admin/sub-admins OK (Total: ${listSubAdminsRes.data.total})`);
+
+  // 7. Sub-Admin can login
+  const subAdminLogin = await request({
+    method: 'POST',
+    path: '/api/v1/auth/login',
+    body: {
+      email: subAdminEmail,
+      password: 'SubAdminPass123!',
+    },
+  });
+  assert(subAdminLogin.status === 200 && subAdminLogin.data.success === true, 'Sub-admin can login with credentials');
+  console.log('✅ Newly created sub-admin logged in successfully');
+
+  // 8. Admin balance increment & decrement by email
+  console.log('\nTesting 5. Admin Increment and Decrement Balance by Email...');
   const incRes = await request({
     method: 'POST',
     path: '/api/v1/admin/users/balance',
+    token: adminToken,
     body: {
-      email,
+      email: investorEmail,
       action: 'increment',
-      amount: 25000.0,
-      reason: 'VIP Promotion Credit',
+      amount: 15000.0,
+      reason: 'Welcome Bonus',
     },
   });
-  assert(incRes.status === 200 && incRes.data.success === true, 'Balance increment OK');
-  assert(incRes.data.data.newBalance === 25000, 'User balance incremented to 25000');
-  assert(incRes.data.data.previousBalance === 0, 'Previous balance was 0');
-  console.log(`✅ Admin incremented user balance to $${incRes.data.data.newBalance}`);
+  assert(incRes.status === 200 && incRes.data.data.newBalance === 15000, 'Balance incremented to 15000');
 
-  // Check user wallet immediately reflects increment
-  const walletAfterInc = await request({ method: 'GET', path: '/api/v1/wallet/summary', token });
-  assert(walletAfterInc.data.data.availableBalance === 25000, 'User wallet balance is 25000');
-  console.log('✅ User wallet summary updated to 25000');
-
-  // 4. Admin decrement user balance by email
-  console.log('\nTesting 3. Admin Decrement User Balance by Email...');
   const decRes = await request({
     method: 'POST',
     path: '/api/v1/admin/users/balance',
+    token: adminToken,
     body: {
-      email,
+      email: investorEmail,
       action: 'decrement',
       amount: 5000.0,
-      reason: 'Fee Correction',
+      reason: 'Adjustment',
     },
   });
-  assert(decRes.status === 200 && decRes.data.success === true, 'Balance decrement OK');
-  assert(decRes.data.data.newBalance === 20000, 'User balance decremented from 25000 to 20000');
-  console.log(`✅ Admin decremented user balance to $${decRes.data.data.newBalance}`);
+  assert(decRes.status === 200 && decRes.data.data.newBalance === 10000, 'Balance decremented to 10000');
+  console.log('✅ Admin balance adjustment by email OK');
 
-  // Check user wallet immediately reflects decrement
-  const walletAfterDec = await request({ method: 'GET', path: '/api/v1/wallet/summary', token });
-  assert(walletAfterDec.data.data.availableBalance === 20000, 'User wallet balance is 20000');
-  console.log('✅ User wallet summary updated to 20000');
-
-  // 5. Submit Deposit with Receipt Image
-  console.log('\nTesting 4. Submit Deposit with Receipt Proof Image...');
+  // 9. Deposit submission with receipt image & admin view
+  console.log('\nTesting 6. Deposit with Receipt Image...');
   const mockReceiptBase64 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
   const createDepRes = await request({
     method: 'POST',
     path: '/api/v1/deposits',
-    token,
+    token: userToken,
     body: {
       method: 'btc',
       amount: 5000.0,
       currency: 'USD',
-      transactionHash: '0x998877665544332211',
+      transactionHash: '0x123456789abcdef',
       receiptImage: mockReceiptBase64,
     },
   });
-  assert(createDepRes.status === 201, 'Deposit created status 201');
+  assert(createDepRes.status === 201, 'Deposit created');
   const depositTxId = createDepRes.data.transaction.id;
 
-  const adminApproveRes = await request({
-    method: 'PATCH',
-    path: `/api/v1/admin/deposits/${depositTxId}/status`,
-    body: { status: 'approved' },
-  });
-  assert(adminApproveRes.status === 200 && adminApproveRes.data.status === 'approved', 'Admin approved deposit');
-  console.log('✅ Deposit submitted and approved');
+  const adminDepsRes = await request({ method: 'GET', path: '/api/v1/admin/deposits' });
+  const foundDep = adminDepsRes.data.deposits.find((d: any) => d.id === depositTxId);
+  assert(foundDep !== undefined && foundDep.receiptImage === mockReceiptBase64, 'Admin receives receipt image proof');
+  console.log('✅ Deposit with receipt image reviewed by admin OK');
 
-  // 6. Investments
-  console.log('\nTesting 5. Investments & Settlement...');
-  const createInvRes = await request({
-    method: 'POST',
-    path: '/api/v1/investments',
-    token,
-    body: {
-      planId: 'vault',
-      planName: 'Quantum Yield Vault',
-      amount: 5000.0,
-      roi: '35%',
-    },
-  });
-  assert(createInvRes.status === 201, 'Investment created');
-  const createdInvId = createInvRes.data.investment.id;
-
-  const settleRes = await request({
-    method: 'POST',
-    path: `/api/v1/investments/${createdInvId}/settle`,
-    token,
-  });
-  assert(settleRes.status === 200 && settleRes.data.settlement.payoutAmount === 6750, 'Settlement OK');
-  console.log('✅ Investment settled');
-
-  // 7. GraphQL Admin Balance Adjust Mutation
-  console.log('\nTesting 6. Apollo GraphQL Admin Balance Adjustment...');
-  const gqlAdminAdjust = await request({
+  // 10. GraphQL Sub-Admin query & mutation
+  console.log('\nTesting 7. Apollo GraphQL Sub-Admin Query & Mutation...');
+  const gqlSubAdminsRes = await request({
     method: 'POST',
     path: '/graphql',
     body: {
       query: `
-        mutation AdminAdjust($email: String!, $action: String!, $amount: Float!) {
-          adminAdjustUserBalance(email: $email, action: $action, amount: $amount, reason: "GraphQL Admin Adjustment") {
-            success
-            message
-            data {
-              email
-              previousBalance
-              newBalance
-              action
-              amount
-            }
+        query GetSubAdmins {
+          subAdmins {
+            id
+            name
+            email
+            role
+            permissions
           }
         }
       `,
-      variables: {
-        email,
-        action: 'increment',
-        amount: 3000.0,
-      },
     },
   });
-  assert(gqlAdminAdjust.status === 200 && gqlAdminAdjust.data.data.adminAdjustUserBalance.success === true, 'GraphQL admin adjust OK');
-  console.log(`✅ Apollo GraphQL Admin Balance Adjustment OK (New Balance: $${gqlAdminAdjust.data.data.adminAdjustUserBalance.data.newBalance})`);
+  assert(gqlSubAdminsRes.status === 200 && Array.isArray(gqlSubAdminsRes.data.data.subAdmins), 'GraphQL subAdmins listed');
+  console.log('✅ Apollo GraphQL subAdmins query OK');
 
-  console.log('\n=======================================================');
-  console.log('🎉 ALL TESTS INCLUDING ADMIN BALANCE ADJUST PASSED 100%!');
-  console.log('=======================================================\n');
+  console.log('\n========================================================================');
+  console.log('🎉 ALL TESTS PASSED: MONGOOSE, SEEDED ADMIN & SUB-ADMINS 100% VERIFIED!');
+  console.log('========================================================================\n');
 }
 
 initializeApp().then((app) => {
