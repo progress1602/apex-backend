@@ -3,6 +3,7 @@ process.env.NODE_ENV = 'test';
 import http from 'http';
 import mongoose from 'mongoose';
 import { initializeApp } from '../src/app';
+import { stopEmbeddedMongo } from '../src/config/database';
 import { UserModel, TransactionModel } from '../src/models';
 
 const PORT = 5097;
@@ -143,10 +144,14 @@ async function runRestartPersistenceTest() {
 
   await new Promise<void>((resolve) => server2.close(() => resolve()));
   await mongoose.disconnect();
+  await stopEmbeddedMongo();
   process.exit(0);
 }
 
 runRestartPersistenceTest().catch((err) => {
   console.error('❌ Restart persistence test failed:', err);
-  mongoose.disconnect().finally(() => process.exit(1));
+  mongoose.disconnect().finally(async () => {
+    await stopEmbeddedMongo();
+    process.exit(1);
+  });
 });

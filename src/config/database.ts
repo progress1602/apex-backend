@@ -60,11 +60,25 @@ export async function connectDatabase(): Promise<typeof mongoose> {
   return mongoose;
 }
 
+let embeddedMongod: any = null;
+
 async function startEmbeddedMongo() {
-  const { MongoMemoryServer } = await import('mongodb-memory-server');
-  const mongod = await MongoMemoryServer.create();
-  const uri = mongod.getUri();
+  if (!embeddedMongod) {
+    const { MongoMemoryServer } = await import('mongodb-memory-server');
+    embeddedMongod = await MongoMemoryServer.create();
+  }
+  const uri = embeddedMongod.getUri();
   await mongoose.connect(uri);
+}
+
+export async function stopEmbeddedMongo() {
+  if (embeddedMongod) {
+    const instance = embeddedMongod;
+    embeddedMongod = null;
+    try {
+      await instance.stop({ doCleanup: true, force: true });
+    } catch {}
+  }
 }
 
 export async function seedAdminUser() {

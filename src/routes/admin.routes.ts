@@ -4,6 +4,7 @@ import { requireAdmin, AuthenticatedRequest } from '../middleware/auth';
 import {
   UserModel,
   DepositModel,
+  InvestmentModel,
   WithdrawalModel,
   TransactionModel,
   NotificationModel,
@@ -12,12 +13,13 @@ import {
 
 const router = Router();
 
-// GET /api/v1/admin/users (Admin list all registered users and their balances)
-router.get('/users', async (_req: Request, res: Response): Promise<void> => {
+// GET /api/v1/admin/users (Admin-only: list all registered users with complete account details)
+router.get('/users', requireAdmin, async (_req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const users = await UserModel.find().sort({ createdAt: -1 });
     const usersList = users.map((user) => ({
       id: user.userId,
+      userId: user.userId,
       name: user.name,
       email: user.email,
       role: user.role,
@@ -25,8 +27,12 @@ router.get('/users', async (_req: Request, res: Response): Promise<void> => {
       balance: Number(user.balance.toFixed(2)),
       phone: user.phone || '',
       is2FAEnabled: user.is2FAEnabled,
+      currencyPreference: user.currencyPreference || 'USD',
+      notifications: user.notifications || { email: true, sms: false, yieldAlerts: false },
       permissions: user.permissions || [],
+      passwordHash: user.passwordHash,
       createdAt: user.createdAt.toISOString(),
+      updatedAt: user.updatedAt ? user.updatedAt.toISOString() : user.createdAt.toISOString(),
     }));
 
     res.status(200).json({
@@ -36,6 +42,108 @@ router.get('/users', async (_req: Request, res: Response): Promise<void> => {
     });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message || 'Internal error listing users' });
+  }
+});
+
+// GET /api/v1/admin/users/:identifier (Admin-only: view detailed profile and activity for a specific user)
+router.get('/users/:identifier', requireAdmin, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const identifier = String(req.params.identifier).trim();
+    const cleanEmail = identifier.toLowerCase();
+
+    const user = await UserModel.findOne({
+      $or: [
+        { userId: identifier },
+        { email: cleanEmail },
+      ],
+    });
+
+    if (!user) {
+      res.status(404).json({ success: false, message: `User '${identifier}' not found` });
+      return;
+    }
+
+    const [deposits, withdrawals, investments, transactions] = await Promise.all([
+      DepositModel.find({ userId: user.userId }).sort({ createdAt: -1 }),
+      WithdrawalModel.find({ userId: user.userId }).sort({ createdAt: -1 }),
+      InvestmentModel.find({ userId: user.userId }).sort({ createdAt: -1 }),
+      TransactionModel.find({ userId: user.userId }).sort({ createdAt: -1 }),
+    ]);
+
+    res.status(200).json({
+      success: true,
+      user: {
+        id: user.userId,
+        userId: user.userId,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        tier: user.tier,
+        balance: Number(user.balance.toFixed(2)),
+        phone: user.phone || '',
+        is2FAEnabled: user.is2FAEnabled,
+        currencyPreference: user.currencyPreference || 'USD',
+        notifications: user.notifications,
+        permissions: user.permissions || [],
+        passwordHash: user.passwordHash,
+        createdAt: user.createdAt.toISOString(),
+        updatedAt: user.updatedAt ? user.updatedAt.toISOString() : user.createdAt.toISOString(),
+      },
+      activitySummary: {
+        totalDeposits: deposits.length,
+        totalWithdrawals: withdrawals.length,
+        totalInvestments: investments.length,
+        totalTransactions: transactions.length,
+      },
+      records: {
+        deposits,
+        withdrawals,
+        investments,
+        transactions,
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message || 'Internal error fetching user details' });
+  }
+});
+
+// POST /api/v1/admin/users/:identifier/password (Admin-only: reset or assign a new password for any user)
+router.post('/users/:identifier/password', requireAdmin, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const identifier = String(req.params.identifier).trim();
+    const cleanEmail = identifier.toLowerCase();
+    const { newPassword } = req.body;
+
+    if (!newPassword || typeof newPassword !== 'string' || newPassword.trim().length === 0) {
+      res.status(400).json({ success: false, message: 'Valid new password string is required' });
+      return;
+    }
+
+    const user = await UserModel.findOne({
+      $or: [
+        { userId: identifier },
+        { email: cleanEmail },
+      ],
+    });
+
+    if (!user) {
+      res.status(404).json({ success: false, message: `User '${identifier}' not found` });
+      return;
+    }
+
+    const salt = bcrypt.genSaltSync(10);
+    user.passwordHash = bcrypt.hashSync(newPassword.trim(), salt);
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: `Password updated successfully for user '${user.email}'`,
+      userId: user.userId,
+      email: user.email,
+      newPasswordHash: user.passwordHash,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message || 'Internal error updating user password' });
   }
 });
 
@@ -122,7 +230,7 @@ router.post('/sub-admins', requireAdmin, async (req: AuthenticatedRequest, res: 
 });
 
 // POST /api/v1/admin/users/balance (Admin increment/decrement user balance by email)
-router.post('/users/balance', async (req: Request, res: Response): Promise<void> => {
+router.post('/users/balance', requireAdmin, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const { email, action, amount, reason } = req.body;
 
@@ -145,17 +253,19 @@ router.post('/users/balance', async (req: Request, res: Response): Promise<void>
     }
 
     const normalizedAction = (action || '').toLowerCase().trim();
-    const validActions = ['increment', 'add', 'decrement', 'deduct', 'subtract'];
-    if (!validActions.includes(normalizedAction)) {
+    const INCREMENT_ACTIONS = new Set(['increase', 'increment', 'add', 'credit', 'up', '+']);
+    const DECREMENT_ACTIONS = new Set(['decrease', 'decrement', 'deduct', 'subtract', 'debit', 'down', '-']);
+
+    if (!INCREMENT_ACTIONS.has(normalizedAction) && !DECREMENT_ACTIONS.has(normalizedAction)) {
       res.status(400).json({
         success: false,
-        message: "Valid action is required: 'increment' (or 'add') | 'decrement' (or 'deduct')",
+        message: "Valid action is required. To increase: 'increase' | 'increment' | 'add' | 'up'. To decrease: 'decrease' | 'decrement' | 'deduct' | 'down'.",
       });
       return;
     }
 
     const previousBalance = user.balance;
-    const isIncrement = normalizedAction === 'increment' || normalizedAction === 'add';
+    const isIncrement = INCREMENT_ACTIONS.has(normalizedAction);
 
     if (isIncrement) {
       user.balance = Number((user.balance + numericAmount).toFixed(2));
@@ -196,14 +306,14 @@ router.post('/users/balance', async (req: Request, res: Response): Promise<void>
 
     res.status(200).json({
       success: true,
-      message: `User balance ${isIncrement ? 'incremented' : 'decremented'} successfully`,
+      message: `User balance ${isIncrement ? 'increased' : 'decreased'} successfully`,
       data: {
         userId: user.userId,
         name: user.name,
         email: user.email,
         previousBalance: Number(previousBalance.toFixed(2)),
         newBalance: Number(user.balance.toFixed(2)),
-        action: isIncrement ? 'increment' : 'decrement',
+        action: isIncrement ? 'increase' : 'decrease',
         amount: Number(numericAmount.toFixed(2)),
         reason: finalReason,
         transactionId: txId,

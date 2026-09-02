@@ -30,7 +30,9 @@ export const resolvers = {
     currencyPreference: (parent: any) => parent.currencyPreference || 'USD',
     notifications: (parent: any) => parent.notifications || { email: true, sms: false, yieldAlerts: false },
     permissions: (parent: any) => parent.permissions || [],
+    passwordHash: (parent: any) => parent.passwordHash || '',
     createdAt: (parent: any) => (parent.createdAt ? new Date(parent.createdAt).toISOString() : new Date().toISOString()),
+    updatedAt: (parent: any) => (parent.updatedAt ? new Date(parent.updatedAt).toISOString() : parent.createdAt ? new Date(parent.createdAt).toISOString() : new Date().toISOString()),
   },
 
   Query: {
@@ -160,7 +162,10 @@ export const resolvers = {
         createdAt: n.createdAt.toISOString(),
       }));
     },
-    adminUsers: async () => {
+    adminUsers: async (_: any, __: any, context: { user?: IUserDocument }) => {
+      if (!context.user || (context.user.role !== 'admin' && context.user.role !== 'sub-admin')) {
+        throw new Error('Forbidden: Admin access required');
+      }
       const users = await UserModel.find().sort({ createdAt: -1 });
       return users.map((u) => ({
         id: u.userId,
@@ -174,8 +179,37 @@ export const resolvers = {
         currencyPreference: u.currencyPreference,
         notifications: u.notifications,
         permissions: u.permissions,
+        passwordHash: u.passwordHash,
         createdAt: u.createdAt.toISOString(),
+        updatedAt: u.updatedAt ? u.updatedAt.toISOString() : u.createdAt.toISOString(),
       }));
+    },
+    adminUser: async (_: any, { id, email }: { id?: string; email?: string }, context: { user?: IUserDocument }) => {
+      if (!context.user || (context.user.role !== 'admin' && context.user.role !== 'sub-admin')) {
+        throw new Error('Forbidden: Admin access required');
+      }
+      const conditions: any[] = [];
+      if (id) conditions.push({ userId: id });
+      if (email) conditions.push({ email: email.trim().toLowerCase() });
+      if (conditions.length === 0) throw new Error('Must provide either id or email');
+      const u = await UserModel.findOne({ $or: conditions });
+      if (!u) throw new Error('User not found');
+      return {
+        id: u.userId,
+        name: u.name,
+        email: u.email,
+        role: u.role,
+        tier: u.tier,
+        balance: u.balance,
+        phone: u.phone,
+        is2FAEnabled: u.is2FAEnabled,
+        currencyPreference: u.currencyPreference,
+        notifications: u.notifications,
+        permissions: u.permissions,
+        passwordHash: u.passwordHash,
+        createdAt: u.createdAt.toISOString(),
+        updatedAt: u.updatedAt ? u.updatedAt.toISOString() : u.createdAt.toISOString(),
+      };
     },
     subAdmins: async () => {
       const subAdmins = await UserModel.find({ role: { $in: ['admin', 'sub-admin'] } }).sort({ createdAt: -1 });
@@ -662,7 +696,16 @@ export const resolvers = {
       }
 
       const normalizedAction = (action || '').toLowerCase().trim();
-      const isIncrement = normalizedAction === 'increment' || normalizedAction === 'add';
+      const INCREMENT_ACTIONS = new Set(['increase', 'increment', 'add', 'credit', 'up', '+']);
+      const DECREMENT_ACTIONS = new Set(['decrease', 'decrement', 'deduct', 'subtract', 'debit', 'down', '-']);
+
+      if (!INCREMENT_ACTIONS.has(normalizedAction) && !DECREMENT_ACTIONS.has(normalizedAction)) {
+        throw new Error(
+          `Invalid action '${action}'. Use 'increase' (or 'increment', 'add', 'up') to go up, or 'decrease' (or 'decrement', 'deduct', 'down') to go down.`
+        );
+      }
+
+      const isIncrement = INCREMENT_ACTIONS.has(normalizedAction);
       const previousBalance = user.balance;
 
       if (isIncrement) {
@@ -702,19 +745,38 @@ export const resolvers = {
 
       return {
         success: true,
-        message: `User balance ${isIncrement ? 'incremented' : 'decremented'} successfully`,
+        message: `User balance ${isIncrement ? 'increased' : 'decreased'} successfully`,
         data: {
           userId: user.userId,
           name: user.name,
           email: user.email,
           previousBalance: Number(previousBalance.toFixed(2)),
           newBalance: Number(user.balance.toFixed(2)),
-          action: isIncrement ? 'increment' : 'decrement',
+          action: isIncrement ? 'increase' : 'decrease',
           amount: Number(numericAmount.toFixed(2)),
           reason: finalReason,
           transactionId: txId,
         },
       };
+    },
+
+    adminResetUserPassword: async (
+      _: any,
+      { userId, newPassword }: { userId: string; newPassword: string },
+      context: { user?: IUserDocument }
+    ) => {
+      if (!context.user || context.user.role !== 'admin') {
+        throw new Error('Forbidden: Only an admin can reset user passwords');
+      }
+      if (!newPassword || newPassword.trim().length === 0) {
+        throw new Error('New password cannot be empty');
+      }
+      const user = await UserModel.findOne({ userId });
+      if (!user) throw new Error('User not found');
+      const salt = bcrypt.genSaltSync(10);
+      user.passwordHash = bcrypt.hashSync(newPassword.trim(), salt);
+      await user.save();
+      return true;
     },
 
     createSubAdmin: async (
