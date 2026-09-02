@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 import { generateToken } from '../middleware/auth';
 import {
@@ -286,19 +287,42 @@ export const resolvers = {
     },
 
     login: async (_: any, { email, password }: { email: string; password: string }) => {
-      const cleanEmail = email.trim().toLowerCase();
-      const cleanPassword = password.trim();
+      const cleanEmail = String(email || '').trim().toLowerCase();
+      const cleanPassword = String(password || '').trim();
 
+      // Check MongoDB connection state (0: disconnected, 1: connected, 2: connecting, 3: disconnecting)
+      const mongoStateNum = mongoose.connection.readyState;
+      const mongoState =
+        mongoStateNum === 1
+          ? 'connected'
+          : mongoStateNum === 2
+          ? 'connecting'
+          : mongoStateNum === 3
+          ? 'disconnecting'
+          : 'disconnected';
+
+      // Query MongoDB Atlas via Mongoose UserModel (NOT from in-memory Map or db.json)
       const user = await UserModel.findOne({ email: cleanEmail });
+      const userFound = Boolean(user);
+
+      let passwordComparisonSucceeded = false;
+      if (user && user.passwordHash) {
+        const storedHash = String(user.passwordHash).trim();
+        passwordComparisonSucceeded =
+          bcrypt.compareSync(cleanPassword, storedHash) ||
+          cleanPassword === storedHash;
+      }
+
+      // Safe debug logging: ONLY normalized email, userFound, passwordComparisonSucceeded, mongoState
+      console.log(
+        `[AUTH_DEBUG] GraphQL Login attempt | normalizedEmail: "${cleanEmail}" | userFound: ${userFound} | passwordMatch: ${passwordComparisonSucceeded} | mongoConnectionState: "${mongoState}"`
+      );
+
       if (!user) {
         throw new Error('Invalid email or password');
       }
 
-      const isValidPassword =
-        bcrypt.compareSync(cleanPassword, user.passwordHash) ||
-        cleanPassword === user.passwordHash;
-
-      if (!isValidPassword) {
+      if (!passwordComparisonSucceeded) {
         throw new Error('Invalid email or password');
       }
 

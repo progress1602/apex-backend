@@ -482,7 +482,31 @@ async function runTestSuite() {
   assert(gqlAdjustRes.status === 200 && gqlAdjustRes.data.data.adminAdjustUserBalance.success === true, 'GraphQL adminAdjustUserBalance failed');
   assert(gqlAdjustRes.data.data.adminAdjustUserBalance.data.newBalance === 30000, 'GraphQL balance after increase is not 30000');
   assert(gqlAdjustRes.data.data.adminAdjustUserBalance.data.action === 'increase', 'GraphQL action is not increase');
-  console.log('✅ Apollo GraphQL queries & admin mutations executed directly against MongoDB Atlas');
+
+  // Test GraphQL login mutation backed by MongoDB UserModel
+  const gqlLoginRes = await request({
+    method: 'POST',
+    path: '/graphql',
+    body: {
+      query: `
+        mutation LoginUser {
+          login(email: "${testEmail}", password: "BrandNewAdminSetPassword123!") {
+            success
+            token
+            user {
+              id
+              email
+              name
+              balance
+            }
+          }
+        }
+      `,
+    },
+  });
+  assert(gqlLoginRes.status === 200 && gqlLoginRes.data.data.login.success === true, 'GraphQL login failed');
+  assert(gqlLoginRes.data.data.login.user.email === testEmail, 'GraphQL login user email mismatch');
+  console.log('✅ Apollo GraphQL queries, login & admin mutations executed directly against MongoDB Atlas');
 
   // 14. Test Safe Data Migration & Idempotency
   console.log('\n14. Testing Safe JSON to MongoDB Atlas Migration Logic...');

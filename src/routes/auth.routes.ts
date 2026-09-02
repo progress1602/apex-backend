@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 import { generateToken, authenticate, AuthenticatedRequest } from '../middleware/auth';
 import { UserModel } from '../models';
@@ -83,20 +84,41 @@ router.post('/login', async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    const cleanEmail = email.trim().toLowerCase();
-    const cleanPassword = password.trim();
+    const cleanEmail = String(email || '').trim().toLowerCase();
+    const cleanPassword = String(password || '').trim();
+
+    const mongoStateNum = mongoose.connection.readyState;
+    const mongoState =
+      mongoStateNum === 1
+        ? 'connected'
+        : mongoStateNum === 2
+        ? 'connecting'
+        : mongoStateNum === 3
+        ? 'disconnecting'
+        : 'disconnected';
 
     const user = await UserModel.findOne({ email: cleanEmail });
+    const userFound = Boolean(user);
+
+    let passwordComparisonSucceeded = false;
+    if (user && user.passwordHash) {
+      const storedHash = String(user.passwordHash).trim();
+      passwordComparisonSucceeded =
+        bcrypt.compareSync(cleanPassword, storedHash) ||
+        cleanPassword === storedHash;
+    }
+
+    // Safe debug logging: ONLY normalized email, userFound, passwordComparisonSucceeded, mongoState
+    console.log(
+      `[AUTH_DEBUG] REST Login attempt | normalizedEmail: "${cleanEmail}" | userFound: ${userFound} | passwordMatch: ${passwordComparisonSucceeded} | mongoConnectionState: "${mongoState}"`
+    );
+
     if (!user) {
       res.status(401).json({ success: false, message: 'Invalid email or password' });
       return;
     }
 
-    const isValidPassword =
-      bcrypt.compareSync(cleanPassword, user.passwordHash) ||
-      cleanPassword === user.passwordHash;
-
-    if (!isValidPassword) {
+    if (!passwordComparisonSucceeded) {
       res.status(401).json({ success: false, message: 'Invalid email or password' });
       return;
     }

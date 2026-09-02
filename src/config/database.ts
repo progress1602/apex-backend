@@ -1,6 +1,16 @@
+import fs from 'fs';
+import path from 'path';
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
-import { UserModel, PlanModel } from '../models';
+import {
+  UserModel,
+  PlanModel,
+  DepositModel,
+  WithdrawalModel,
+  InvestmentModel,
+  TransactionModel,
+  NotificationModel,
+} from '../models';
 import { PLATFORM_DEFAULT_PLANS } from './platform';
 
 export async function connectDatabase(): Promise<typeof mongoose> {
@@ -53,9 +63,10 @@ export async function connectDatabase(): Promise<typeof mongoose> {
   console.log(`Storage: ${isAtlas ? 'MongoDB Atlas' : 'MongoDB'}`);
   console.log('-------------------------------------------------------');
 
-  // Seed default admin and platform plans in MongoDB
+  // Seed default admin, platform plans, and auto-migrate legacy data into MongoDB Atlas
   await seedAdminUser();
   await seedPlatformPlans();
+  await autoMigrateLegacyJsonData();
 
   return mongoose;
 }
@@ -129,5 +140,59 @@ export async function seedPlatformPlans() {
     }
   } catch (err) {
     console.error('Error during platform plan seeding:', err);
+  }
+}
+
+export async function autoMigrateLegacyJsonData(): Promise<void> {
+  try {
+    const dbFilePath = path.join(process.cwd(), 'data', 'db.json');
+    if (!fs.existsSync(dbFilePath)) {
+      return;
+    }
+
+    const raw = fs.readFileSync(dbFilePath, 'utf-8');
+    const data = JSON.parse(raw);
+    let migratedUsers = 0;
+
+    // Migrate users (preserving exact passwordHash and normalizing email)
+    if (Array.isArray(data.users)) {
+      for (const item of data.users) {
+        const u = Array.isArray(item) ? item[1] : item;
+        if (!u || !u.email) continue;
+
+        const userId = u.userId || u.id;
+        const cleanEmail = String(u.email).trim().toLowerCase();
+
+        const existing = await UserModel.findOne({
+          $or: [{ email: cleanEmail }, { userId }],
+        });
+
+        if (!existing) {
+          await UserModel.create({
+            userId,
+            name: u.name || 'Investor',
+            email: cleanEmail,
+            passwordHash: u.passwordHash,
+            role: u.role || 'investor',
+            tier: u.tier || 'Tier 1 - Standard',
+            avatar: u.avatar || '',
+            balance: typeof u.balance === 'number' ? u.balance : 0.0,
+            phone: u.phone || '',
+            is2FAEnabled: Boolean(u.is2FAEnabled),
+            currencyPreference: u.currencyPreference || 'USD',
+            notifications: u.notifications || { email: true, sms: false, yieldAlerts: false },
+            permissions: u.permissions || [],
+            createdAt: u.createdAt ? new Date(u.createdAt) : new Date(),
+          });
+          migratedUsers++;
+        }
+      }
+    }
+
+    if (migratedUsers > 0) {
+      console.log(`📦 [MIGRATION] Automatically imported ${migratedUsers} user(s) from legacy store into MongoDB Atlas`);
+    }
+  } catch (err) {
+    console.error('⚠️ [MIGRATION] Error checking legacy data:', err);
   }
 }
