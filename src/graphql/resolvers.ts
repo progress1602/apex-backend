@@ -1,12 +1,24 @@
 import bcrypt from 'bcryptjs';
-import { db } from '../store/db';
 import { generateToken } from '../middleware/auth';
-import { User, DepositTransaction, UserInvestment, WithdrawalTransaction, TransactionLedgerItem, NotificationItem } from '../types';
-import { UserModel } from '../models';
+import {
+  UserModel,
+  DepositModel,
+  InvestmentModel,
+  WithdrawalModel,
+  TransactionModel,
+  NotificationModel,
+  PlanModel,
+  IUserDocument,
+} from '../models';
+import {
+  PLATFORM_DEPOSIT_METHODS,
+  PLATFORM_MARKET_TICKERS,
+  generateChartData,
+} from '../config/platform';
 
 export const resolvers = {
   User: {
-    id: (parent: any) => parent.id,
+    id: (parent: any) => parent.userId || parent.id,
     name: (parent: any) => parent.name || parent.fullName || '',
     email: (parent: any) => parent.email || '',
     role: (parent: any) => parent.role || 'investor',
@@ -18,32 +30,37 @@ export const resolvers = {
     currencyPreference: (parent: any) => parent.currencyPreference || 'USD',
     notifications: (parent: any) => parent.notifications || { email: true, sms: false, yieldAlerts: false },
     permissions: (parent: any) => parent.permissions || [],
-    createdAt: (parent: any) => parent.createdAt || new Date().toISOString(),
+    createdAt: (parent: any) => (parent.createdAt ? new Date(parent.createdAt).toISOString() : new Date().toISOString()),
   },
 
   Query: {
-    me: (_: any, __: any, context: { user?: User }) => {
+    me: async (_: any, __: any, context: { user?: IUserDocument }) => {
       if (!context.user) throw new Error('Unauthorized: Missing or invalid token');
-      return context.user;
+      const freshUser = await UserModel.findOne({ userId: context.user.userId });
+      if (!freshUser) throw new Error('Unauthorized: User not found in database');
+      return freshUser;
     },
-    userProfile: (_: any, __: any, context: { user?: User }) => {
+    userProfile: async (_: any, __: any, context: { user?: IUserDocument }) => {
       if (!context.user) throw new Error('Unauthorized: Missing or invalid token');
-      return context.user;
+      const freshUser = await UserModel.findOne({ userId: context.user.userId });
+      if (!freshUser) throw new Error('Unauthorized: User not found in database');
+      return freshUser;
     },
-    walletSummary: (_: any, __: any, context: { user?: User }) => {
+    walletSummary: async (_: any, __: any, context: { user?: IUserDocument }) => {
       if (!context.user) throw new Error('Unauthorized: Missing or invalid token');
-      const user = context.user;
+      const user = await UserModel.findOne({ userId: context.user.userId });
+      if (!user) throw new Error('Unauthorized: User not found in database');
+
+      const investments = await InvestmentModel.find({ userId: user.userId });
       let activeInvestmentsSum = 0;
       let totalEarnings = 0;
 
-      for (const inv of db.userInvestments.values()) {
-        if (inv.userId === user.id) {
-          if (inv.status === 'active') {
-            activeInvestmentsSum += inv.amount;
-          }
-          if (inv.status === 'settled') {
-            totalEarnings += Math.max(0, inv.projectedReturn - inv.amount);
-          }
+      for (const inv of investments) {
+        if (inv.status === 'active') {
+          activeInvestmentsSum += inv.amount;
+        }
+        if (inv.status === 'settled') {
+          totalEarnings += Math.max(0, inv.projectedReturn - inv.amount);
         }
       }
 
@@ -59,71 +76,165 @@ export const resolvers = {
         currency: user.currencyPreference || 'USD',
       };
     },
-    analyticsChart: (_: any, { period }: { period?: string }, context: { user?: User }) => {
-      const currentBalance = context.user ? context.user.balance : 0;
-      return db.getChartData(period || '1M', currentBalance);
+    analyticsChart: async (_: any, { period }: { period?: string }, context: { user?: IUserDocument }) => {
+      const balance = context.user ? context.user.balance : 0;
+      return generateChartData(period || '1M', balance);
     },
     marketTickers: () => {
-      return db.marketTickers;
+      return PLATFORM_MARKET_TICKERS;
     },
     depositMethods: () => {
-      return db.depositMethods;
+      return PLATFORM_DEPOSIT_METHODS;
     },
-    investmentPlans: () => {
-      return Array.from(db.investmentPlans.values());
+    investmentPlans: async () => {
+      const plans = await PlanModel.find({ status: 'active' });
+      return plans.map((p) => ({
+        id: p.planId,
+        name: p.name,
+        roi: p.roi,
+        durationDays: p.durationDays,
+        minAmount: p.minAmount,
+        maxAmount: p.maxAmount,
+        feeRate: p.feeRate,
+        status: p.status,
+      }));
     },
-    userInvestments: (_: any, __: any, context: { user?: User }) => {
+    userInvestments: async (_: any, __: any, context: { user?: IUserDocument }) => {
       if (!context.user) throw new Error('Unauthorized: Missing or invalid token');
-      return Array.from(db.userInvestments.values()).filter((inv) => inv.userId === context.user!.id);
+      const invs = await InvestmentModel.find({ userId: context.user.userId }).sort({ createdAt: -1 });
+      return invs.map((inv) => ({
+        id: inv.investmentId,
+        planName: inv.planName,
+        amount: inv.amount,
+        roi: inv.roi,
+        progress: inv.progress,
+        projectedReturn: inv.projectedReturn,
+        status: inv.status,
+        startDate: inv.startDate.toISOString(),
+        maturityDate: inv.maturityDate.toISOString(),
+      }));
     },
-    transactions: (_: any, { type, status, page, limit }: { type?: string; status?: string; page?: number; limit?: number }, context: { user?: User }) => {
+    transactions: async (
+      _: any,
+      { type, status, page, limit }: { type?: string; status?: string; page?: number; limit?: number },
+      context: { user?: IUserDocument }
+    ) => {
       if (!context.user) throw new Error('Unauthorized: Missing or invalid token');
-      let filtered = db.transactions.filter((tx) => tx.userId === context.user!.id);
-      if (type && type !== 'all') filtered = filtered.filter((tx) => tx.type.toLowerCase() === type.toLowerCase());
-      if (status && status !== 'all') filtered = filtered.filter((tx) => tx.status.toLowerCase() === status.toLowerCase());
-      const p = page || 1;
-      const l = limit || 20;
-      return filtered.slice((p - 1) * l, (p - 1) * l + l);
+      const filter: Record<string, any> = { userId: context.user.userId };
+
+      if (type && type !== 'all') {
+        filter.type = new RegExp(`^${type}$`, 'i');
+      }
+      if (status && status !== 'all') {
+        filter.status = new RegExp(`^${status}$`, 'i');
+      }
+
+      const p = Math.max(1, page || 1);
+      const l = Math.max(1, Math.min(100, limit || 20));
+      const startIndex = (p - 1) * l;
+
+      const txs = await TransactionModel.find(filter)
+        .sort({ createdAt: -1 })
+        .skip(startIndex)
+        .limit(l);
+
+      return txs.map((tx) => ({
+        id: tx.transactionId,
+        type: tx.type,
+        amount: tx.amount,
+        status: tx.status,
+        plan: tx.plan,
+        receiptImage: tx.receiptImage || '',
+        date: tx.date || tx.createdAt.toISOString(),
+      }));
     },
-    notifications: (_: any, __: any, context: { user?: User }) => {
+    notifications: async (_: any, __: any, context: { user?: IUserDocument }) => {
       if (!context.user) throw new Error('Unauthorized: Missing or invalid token');
-      return Array.from(db.notifications.values()).filter((n) => n.userId === context.user!.id);
+      const notifs = await NotificationModel.find({ userId: context.user.userId }).sort({ createdAt: -1 });
+      return notifs.map((n) => ({
+        id: n.notificationId,
+        title: n.title,
+        message: n.message,
+        type: n.type,
+        isRead: n.isRead,
+        createdAt: n.createdAt.toISOString(),
+      }));
     },
-    adminUsers: () => {
-      return Array.from(db.users.values());
+    adminUsers: async () => {
+      const users = await UserModel.find().sort({ createdAt: -1 });
+      return users.map((u) => ({
+        id: u.userId,
+        name: u.name,
+        email: u.email,
+        role: u.role,
+        tier: u.tier,
+        balance: u.balance,
+        phone: u.phone,
+        is2FAEnabled: u.is2FAEnabled,
+        currencyPreference: u.currencyPreference,
+        notifications: u.notifications,
+        permissions: u.permissions,
+        createdAt: u.createdAt.toISOString(),
+      }));
     },
-    subAdmins: () => {
-      return Array.from(db.users.values()).filter((u) => u.role === 'admin' || u.role === 'sub-admin');
+    subAdmins: async () => {
+      const subAdmins = await UserModel.find({ role: { $in: ['admin', 'sub-admin'] } }).sort({ createdAt: -1 });
+      return subAdmins.map((u) => ({
+        id: u.userId,
+        name: u.name,
+        email: u.email,
+        role: u.role,
+        permissions: u.permissions,
+        createdAt: u.createdAt.toISOString(),
+      }));
     },
-    adminDeposits: () => {
-      return Array.from(db.depositTransactions.values()).map((dep) => {
-        const user = db.users.get(dep.userId);
-        return {
-          ...dep,
-          userName: user ? user.name : dep.userName || 'Investor',
-          userEmail: user ? user.email : dep.userEmail || '',
-        };
-      });
+    adminDeposits: async () => {
+      const deps = await DepositModel.find().sort({ createdAt: -1 });
+      return deps.map((d) => ({
+        id: d.depositId,
+        userId: d.userId,
+        userName: d.userName,
+        userEmail: d.userEmail,
+        type: d.type,
+        amount: d.amount,
+        method: d.method,
+        currency: d.currency,
+        transactionHash: d.transactionHash,
+        receiptImage: d.receiptImage || '',
+        status: d.status,
+        createdAt: d.createdAt.toISOString(),
+      }));
     },
-    adminWithdrawals: () => {
-      return Array.from(db.withdrawalTransactions.values());
+    adminWithdrawals: async () => {
+      const wdrs = await WithdrawalModel.find().sort({ createdAt: -1 });
+      return wdrs.map((w) => ({
+        id: w.withdrawalId,
+        amount: w.amount,
+        fee: w.fee,
+        netPayout: w.netPayout,
+        destinationAddress: w.destinationAddress,
+        status: w.status,
+        createdAt: w.createdAt.toISOString(),
+      }));
     },
   },
 
   Mutation: {
-    signup: (_: any, { fullName, email, password }: { fullName?: string; email: string; password: string }) => {
+    signup: async (_: any, { fullName, email, password }: { fullName?: string; email: string; password: string }) => {
       const cleanEmail = email.trim().toLowerCase();
       const cleanPassword = password.trim();
-      const existingUser = db.getUserByEmail(cleanEmail);
+
+      const existingUser = await UserModel.findOne({ email: cleanEmail });
       if (existingUser) {
         throw new Error('An account with this email already exists');
       }
+
       const salt = bcrypt.genSaltSync(10);
       const passwordHash = bcrypt.hashSync(cleanPassword, salt);
       const userId = `usr_${Math.floor(1000000 + Math.random() * 9000000)}`;
 
-      const newUser: User = {
-        id: userId,
+      const newUser = await UserModel.create({
+        userId,
         name: (fullName || cleanEmail.split('@')[0] || 'Investor').trim(),
         email: cleanEmail,
         passwordHash,
@@ -134,27 +245,29 @@ export const resolvers = {
         is2FAEnabled: false,
         currencyPreference: 'USD',
         notifications: { email: true, sms: false, yieldAlerts: false },
-        createdAt: new Date().toISOString(),
-      };
-      db.users.set(newUser.id, newUser);
-      db.saveToDisk();
+      });
+
       const token = generateToken(newUser);
       return { success: true, token, user: newUser };
     },
 
-    login: (_: any, { email, password }: { email: string; password: string }) => {
+    login: async (_: any, { email, password }: { email: string; password: string }) => {
       const cleanEmail = email.trim().toLowerCase();
       const cleanPassword = password.trim();
-      const user = db.getUserByEmail(cleanEmail);
+
+      const user = await UserModel.findOne({ email: cleanEmail });
       if (!user) {
         throw new Error('Invalid email or password');
       }
+
       const isValidPassword =
         bcrypt.compareSync(cleanPassword, user.passwordHash) ||
         cleanPassword === user.passwordHash;
+
       if (!isValidPassword) {
         throw new Error('Invalid email or password');
       }
+
       const token = generateToken(user);
       return {
         success: true,
@@ -163,17 +276,28 @@ export const resolvers = {
       };
     },
 
-    updateProfile: (_: any, args: { name?: string; phone?: string; is2FAEnabled?: boolean; currencyPreference?: string }, context: { user?: User }) => {
+    updateProfile: async (
+      _: any,
+      args: { name?: string; phone?: string; is2FAEnabled?: boolean; currencyPreference?: string },
+      context: { user?: IUserDocument }
+    ) => {
       if (!context.user) throw new Error('Unauthorized: Missing or invalid token');
-      const user = context.user;
-      if (args.name !== undefined) user.name = args.name;
-      if (args.phone !== undefined) user.phone = args.phone;
-      if (args.is2FAEnabled !== undefined) user.is2FAEnabled = args.is2FAEnabled;
-      if (args.currencyPreference !== undefined) user.currencyPreference = args.currencyPreference;
-      return user;
+      const updates: Record<string, any> = {};
+      if (args.name !== undefined) updates.name = args.name;
+      if (args.phone !== undefined) updates.phone = args.phone;
+      if (args.is2FAEnabled !== undefined) updates.is2FAEnabled = args.is2FAEnabled;
+      if (args.currencyPreference !== undefined) updates.currencyPreference = args.currencyPreference;
+
+      const updated = await UserModel.findOneAndUpdate(
+        { userId: context.user.userId },
+        { $set: updates },
+        { new: true }
+      );
+      if (!updated) throw new Error('User not found in database');
+      return updated;
     },
 
-    createDeposit: (
+    createDeposit: async (
       _: any,
       {
         method,
@@ -188,18 +312,17 @@ export const resolvers = {
         transactionHash?: string;
         receiptImage?: string;
       },
-      context: { user?: User }
+      context: { user?: IUserDocument }
     ) => {
       if (!context.user) throw new Error('Unauthorized: Missing or invalid token');
       const user = context.user;
-      const selectedMethod = db.depositMethods.find((m) => m.id.toLowerCase() === method.toLowerCase());
+      const selectedMethod = PLATFORM_DEPOSIT_METHODS.find((m) => m.id.toLowerCase() === method.toLowerCase());
       const methodName = selectedMethod ? selectedMethod.name : method.toUpperCase();
       const txId = `tx_dep_${Math.floor(10000 + Math.random() * 90000)}`;
-      const createdAt = new Date().toISOString();
 
-      const depositTx: DepositTransaction = {
-        id: txId,
-        userId: user.id,
+      const depositTx = await DepositModel.create({
+        depositId: txId,
+        userId: user.userId,
         userName: user.name,
         userEmail: user.email,
         type: 'deposit',
@@ -209,45 +332,68 @@ export const resolvers = {
         transactionHash: transactionHash || `0x${Math.random().toString(16).substring(2, 30)}`,
         receiptImage: receiptImage || '',
         status: 'pending',
-        createdAt,
-      };
-      db.depositTransactions.set(txId, depositTx);
-      db.transactions.unshift({
-        id: txId,
-        userId: user.id,
+      });
+
+      await TransactionModel.create({
+        transactionId: txId,
+        userId: user.userId,
         type: 'deposit',
         amount: Number(amount),
         status: 'pending',
         plan: 'Direct Inflow',
         receiptImage: receiptImage || '',
-        date: createdAt,
+        date: depositTx.createdAt.toISOString(),
       });
-      return depositTx;
+
+      return {
+        id: depositTx.depositId,
+        userId: depositTx.userId,
+        userName: depositTx.userName,
+        userEmail: depositTx.userEmail,
+        type: depositTx.type,
+        amount: depositTx.amount,
+        method: depositTx.method,
+        currency: depositTx.currency,
+        transactionHash: depositTx.transactionHash,
+        receiptImage: depositTx.receiptImage,
+        status: depositTx.status,
+        createdAt: depositTx.createdAt.toISOString(),
+      };
     },
 
-    createInvestment: (_: any, { planId, planName, amount, roi }: { planId?: string; planName?: string; amount: number; roi?: string }, context: { user?: User }) => {
+    createInvestment: async (
+      _: any,
+      { planId, planName, amount, roi }: { planId?: string; planName?: string; amount: number; roi?: string },
+      context: { user?: IUserDocument }
+    ) => {
       if (!context.user) throw new Error('Unauthorized: Missing or invalid token');
       const user = context.user;
       const invAmount = Number(amount);
-      if (user.balance < invAmount) throw new Error('Insufficient balance');
-      user.balance -= invAmount;
 
-      const resolvedPlan = planId ? db.investmentPlans.get(planId) : undefined;
+      // Atomically check and deduct user balance
+      const updatedUser = await UserModel.findOneAndUpdate(
+        { userId: user.userId, balance: { $gte: invAmount } },
+        { $inc: { balance: -invAmount } },
+        { new: true }
+      );
+
+      if (!updatedUser) throw new Error('Insufficient balance for investment');
+
+      const resolvedPlan = planId ? await PlanModel.findOne({ planId }) : null;
       const finalPlanName = planName || (resolvedPlan ? resolvedPlan.name : 'Apex Starter Tier');
       const finalRoi = roi || (resolvedPlan ? resolvedPlan.roi : '15%');
       const durationDays = resolvedPlan ? resolvedPlan.durationDays : 7;
 
       const invId = `inv_${Math.floor(1000 + Math.random() * 9000)}`;
-      const startDate = new Date().toISOString();
-      const maturityDateObj = new Date();
-      maturityDateObj.setDate(maturityDateObj.getDate() + durationDays);
+      const startDate = new Date();
+      const maturityDate = new Date(startDate.getTime() + durationDays * 24 * 60 * 60 * 1000);
 
       const roiPercent = parseFloat(finalRoi.replace('%', '')) || 15;
       const projectedReturn = Number((invAmount * (1 + roiPercent / 100)).toFixed(2));
 
-      const newInvestment: UserInvestment = {
-        id: invId,
-        userId: user.id,
+      const newInvestment = await InvestmentModel.create({
+        investmentId: invId,
+        userId: user.userId,
         planId: planId || 'starter',
         planName: finalPlanName,
         amount: invAmount,
@@ -256,63 +402,98 @@ export const resolvers = {
         projectedReturn,
         status: 'active',
         startDate,
-        maturityDate: maturityDateObj.toISOString(),
-      };
-      db.userInvestments.set(invId, newInvestment);
-      db.transactions.unshift({
-        id: `tx_${Math.floor(10000 + Math.random() * 90000)}`,
-        userId: user.id,
+        maturityDate,
+      });
+
+      await TransactionModel.create({
+        transactionId: `tx_${Math.floor(10000 + Math.random() * 90000)}`,
+        userId: user.userId,
         type: 'investment',
         amount: invAmount,
         status: 'approved',
         plan: finalPlanName,
-        date: startDate,
+        date: startDate.toISOString(),
       });
-      return newInvestment;
+
+      return {
+        id: newInvestment.investmentId,
+        planName: newInvestment.planName,
+        amount: newInvestment.amount,
+        roi: newInvestment.roi,
+        progress: newInvestment.progress,
+        projectedReturn: newInvestment.projectedReturn,
+        status: newInvestment.status,
+        startDate: newInvestment.startDate.toISOString(),
+        maturityDate: newInvestment.maturityDate.toISOString(),
+      };
     },
 
-    settleInvestment: (_: any, { id }: { id: string }, context: { user?: User }) => {
+    settleInvestment: async (_: any, { id }: { id: string }, context: { user?: IUserDocument }) => {
       if (!context.user) throw new Error('Unauthorized: Missing or invalid token');
       const user = context.user;
-      const inv = db.userInvestments.get(id);
-      if (!inv || inv.userId !== user.id) throw new Error('Investment position not found');
-      const payoutAmount = inv.projectedReturn || inv.amount * 1.15;
+      const inv = await InvestmentModel.findOne({ investmentId: id, userId: user.userId });
+      if (!inv) throw new Error('Investment position not found');
+      if (inv.status === 'settled') throw new Error('Investment is already settled');
+
+      const payoutAmount = inv.projectedReturn || Number((inv.amount * 1.15).toFixed(2));
       inv.status = 'settled';
       inv.progress = 100;
-      user.balance += payoutAmount;
+      await inv.save();
+
+      const updatedUser = await UserModel.findOneAndUpdate(
+        { userId: user.userId },
+        { $inc: { balance: payoutAmount } },
+        { new: true }
+      );
+
       const txId = `tx_settle_${Math.floor(10000 + Math.random() * 90000)}`;
-      db.transactions.unshift({
-        id: txId,
-        userId: user.id,
+      const nowIso = new Date().toISOString();
+
+      await TransactionModel.create({
+        transactionId: txId,
+        userId: user.userId,
         type: 'investment',
         amount: payoutAmount,
         status: 'completed',
         plan: `${inv.planName} Settlement`,
-        date: new Date().toISOString(),
+        date: nowIso,
       });
+
       return {
-        investmentId: inv.id,
+        investmentId: inv.investmentId,
         payoutAmount: Number(payoutAmount.toFixed(2)),
-        creditedBalance: Number(user.balance.toFixed(2)),
+        creditedBalance: Number(updatedUser?.balance.toFixed(2) || 0),
         transactionId: txId,
         status: 'completed',
       };
     },
 
-    createWithdrawal: (_: any, { amount, method, destinationAddress }: { amount: number; method?: string; destinationAddress: string; twoFactorCode?: string }, context: { user?: User }) => {
+    createWithdrawal: async (
+      _: any,
+      { amount, method, destinationAddress }: { amount: number; method?: string; destinationAddress: string; twoFactorCode?: string },
+      context: { user?: IUserDocument }
+    ) => {
       if (!context.user) throw new Error('Unauthorized: Missing or invalid token');
       const user = context.user;
       const wdrAmount = Number(amount);
-      if (user.balance < wdrAmount) throw new Error('Insufficient balance');
       const fee = 15.0;
-      user.balance -= wdrAmount;
+
+      const updatedUser = await UserModel.findOneAndUpdate(
+        { userId: user.userId, balance: { $gte: wdrAmount } },
+        { $inc: { balance: -wdrAmount } },
+        { new: true }
+      );
+
+      if (!updatedUser) throw new Error('Insufficient balance for withdrawal');
+
       const txId = `tx_wdr_${Math.floor(10000 + Math.random() * 90000)}`;
-      const createdAt = new Date().toISOString();
       const netPayout = Number((wdrAmount - fee).toFixed(2));
 
-      const withdrawal: WithdrawalTransaction = {
-        id: txId,
-        userId: user.id,
+      const withdrawal = await WithdrawalModel.create({
+        withdrawalId: txId,
+        userId: user.userId,
+        userName: user.name,
+        userEmail: user.email,
         type: 'withdrawal',
         amount: wdrAmount,
         fee,
@@ -320,79 +501,159 @@ export const resolvers = {
         method: method || 'btc',
         destinationAddress,
         status: 'pending',
-        createdAt,
-      };
-      db.withdrawalTransactions.set(txId, withdrawal);
-      db.transactions.unshift({
-        id: txId,
-        userId: user.id,
+      });
+
+      await TransactionModel.create({
+        transactionId: txId,
+        userId: user.userId,
         type: 'withdrawal',
         amount: wdrAmount,
         status: 'pending',
         plan: 'External Payout',
-        date: createdAt,
+        date: withdrawal.createdAt.toISOString(),
       });
-      return withdrawal;
+
+      return {
+        id: withdrawal.withdrawalId,
+        amount: withdrawal.amount,
+        fee: withdrawal.fee,
+        netPayout: withdrawal.netPayout,
+        destinationAddress: withdrawal.destinationAddress,
+        status: withdrawal.status,
+        createdAt: withdrawal.createdAt.toISOString(),
+      };
     },
 
-    markNotificationRead: (_: any, { id }: { id: string }, context: { user?: User }) => {
+    markNotificationRead: async (_: any, { id }: { id: string }, context: { user?: IUserDocument }) => {
       if (!context.user) throw new Error('Unauthorized: Missing or invalid token');
-      const notif = db.notifications.get(id);
-      if (notif && notif.userId === context.user.id) notif.isRead = true;
+      await NotificationModel.findOneAndUpdate(
+        { notificationId: id, userId: context.user.userId },
+        { isRead: true }
+      );
       return true;
     },
 
-    markAllNotificationsRead: (_: any, __: any, context: { user?: User }) => {
+    markAllNotificationsRead: async (_: any, __: any, context: { user?: IUserDocument }) => {
       if (!context.user) throw new Error('Unauthorized: Missing or invalid token');
-      const user = context.user;
-      for (const notif of db.notifications.values()) {
-        if (notif.userId === user.id) notif.isRead = true;
-      }
+      await NotificationModel.updateMany({ userId: context.user.userId }, { isRead: true });
       return true;
     },
 
-    adminUpdateDepositStatus: (_: any, { id, status }: { id: string; status: string }) => {
-      const deposit = db.depositTransactions.get(id);
-      if (deposit) {
-        deposit.status = status.toLowerCase() as any;
-        if (deposit.status === 'approved') {
-          const user = db.users.get(deposit.userId);
-          if (user) user.balance += deposit.amount;
-        }
+    adminUpdateDepositStatus: async (_: any, { id, status }: { id: string; status: string }) => {
+      const deposit = await DepositModel.findOne({ depositId: id });
+      if (!deposit) throw new Error('Deposit transaction not found');
+
+      const prevStatus = deposit.status;
+      const targetStatus = status.toLowerCase() as 'pending' | 'approved' | 'rejected';
+      deposit.status = targetStatus;
+      await deposit.save();
+
+      if (prevStatus !== 'approved' && targetStatus === 'approved') {
+        await UserModel.findOneAndUpdate(
+          { userId: deposit.userId },
+          { $inc: { balance: deposit.amount } }
+        );
       }
-      return deposit || { id, type: 'deposit', amount: 0, method: 'Direct', status, createdAt: new Date().toISOString() };
+
+      await TransactionModel.findOneAndUpdate(
+        { transactionId: id },
+        { status: targetStatus }
+      );
+
+      return {
+        id: deposit.depositId,
+        userId: deposit.userId,
+        userName: deposit.userName,
+        userEmail: deposit.userEmail,
+        type: deposit.type,
+        amount: deposit.amount,
+        method: deposit.method,
+        currency: deposit.currency,
+        transactionHash: deposit.transactionHash,
+        receiptImage: deposit.receiptImage || '',
+        status: deposit.status,
+        createdAt: deposit.createdAt.toISOString(),
+      };
     },
 
-    adminUpdateWithdrawalStatus: (_: any, { id, status, txHash }: { id: string; status: string; txHash?: string }) => {
-      const withdrawal = db.withdrawalTransactions.get(id);
-      if (withdrawal) {
-        withdrawal.status = status.toLowerCase() as any;
-        if (txHash) withdrawal.txHash = txHash;
+    adminUpdateWithdrawalStatus: async (_: any, { id, status, txHash }: { id: string; status: string; txHash?: string }) => {
+      const withdrawal = await WithdrawalModel.findOne({ withdrawalId: id });
+      if (!withdrawal) throw new Error('Withdrawal request not found');
+
+      const prevStatus = withdrawal.status;
+      const targetStatus = status.toLowerCase() as 'pending' | 'processed' | 'rejected';
+      withdrawal.status = targetStatus;
+      if (txHash) withdrawal.txHash = txHash;
+      await withdrawal.save();
+
+      if (prevStatus !== 'rejected' && targetStatus === 'rejected') {
+        await UserModel.findOneAndUpdate(
+          { userId: withdrawal.userId },
+          { $inc: { balance: withdrawal.amount } }
+        );
       }
-      return withdrawal || { id, amount: 0, fee: 0, netPayout: 0, destinationAddress: '', status, createdAt: new Date().toISOString() };
+
+      await TransactionModel.findOneAndUpdate(
+        { transactionId: id },
+        { status: targetStatus }
+      );
+
+      return {
+        id: withdrawal.withdrawalId,
+        amount: withdrawal.amount,
+        fee: withdrawal.fee,
+        netPayout: withdrawal.netPayout,
+        destinationAddress: withdrawal.destinationAddress,
+        status: withdrawal.status,
+        createdAt: withdrawal.createdAt.toISOString(),
+      };
     },
 
-    adminUpdatePlan: (_: any, { id, roi, minAmount, maxAmount, feeRate }: { id: string; roi?: string; minAmount?: number; maxAmount?: number; feeRate?: number }) => {
-      let plan = db.investmentPlans.get(id);
-      if (!plan) {
-        plan = { id, name: `Apex Plan ${id.toUpperCase()}`, roi: roi || '15%', durationDays: 7, minAmount: minAmount || 500, maxAmount: maxAmount || 10000, feeRate: feeRate || 0.1, status: 'active' };
-        db.investmentPlans.set(id, plan);
-      } else {
-        if (roi !== undefined) plan.roi = roi;
-        if (minAmount !== undefined) plan.minAmount = minAmount;
-        if (maxAmount !== undefined) plan.maxAmount = maxAmount;
-        if (feeRate !== undefined) plan.feeRate = feeRate;
-      }
-      return plan;
+    adminUpdatePlan: async (_: any, { id, roi, minAmount, maxAmount, feeRate }: { id: string; roi?: string; minAmount?: number; maxAmount?: number; feeRate?: number }) => {
+      const updates: Record<string, any> = {};
+      if (roi !== undefined) updates.roi = roi;
+      if (minAmount !== undefined) updates.minAmount = minAmount;
+      if (maxAmount !== undefined) updates.maxAmount = maxAmount;
+      if (feeRate !== undefined) updates.feeRate = feeRate;
+
+      const plan = await PlanModel.findOneAndUpdate(
+        { planId: id },
+        {
+          $set: updates,
+          $setOnInsert: {
+            planId: id,
+            name: `Apex Plan ${id.toUpperCase()}`,
+            roi: roi || '15%',
+            durationDays: 7,
+            minAmount: minAmount || 500,
+            maxAmount: maxAmount || 10000,
+            feeRate: feeRate || 0.1,
+            status: 'active',
+          },
+        },
+        { upsert: true, new: true }
+      );
+
+      return {
+        id: plan.planId,
+        name: plan.name,
+        roi: plan.roi,
+        durationDays: plan.durationDays,
+        minAmount: plan.minAmount,
+        maxAmount: plan.maxAmount,
+        feeRate: plan.feeRate,
+        status: plan.status,
+      };
     },
 
-    adminAdjustUserBalance: (
+    adminAdjustUserBalance: async (
       _: any,
       { email, action, amount, reason }: { email: string; action: string; amount: number; reason?: string }
     ) => {
-      const user = db.getUserByEmail(email);
+      const cleanEmail = email.trim().toLowerCase();
+      const user = await UserModel.findOne({ email: cleanEmail });
       if (!user) {
-        throw new Error(`User with email '${email}' not found`);
+        throw new Error(`User with email '${cleanEmail}' not found`);
       }
 
       const numericAmount = Number(amount);
@@ -410,43 +671,40 @@ export const resolvers = {
         user.balance = Number(Math.max(0, user.balance - numericAmount).toFixed(2));
       }
 
+      await user.save();
+
       const adjustmentFormatted = isIncrement
         ? `+$${numericAmount.toFixed(2)}`
         : `-$${numericAmount.toFixed(2)}`;
       const finalReason = reason || (isIncrement ? 'Admin Balance Credit' : 'Admin Balance Debit');
       const txId = `tx_adj_${Math.floor(10000 + Math.random() * 90000)}`;
-      const createdAt = new Date().toISOString();
+      const now = new Date();
 
-      // Record in transactions ledger
-      const ledgerItem: TransactionLedgerItem = {
-        id: txId,
-        userId: user.id,
+      await TransactionModel.create({
+        transactionId: txId,
+        userId: user.userId,
         type: isIncrement ? 'deposit' : 'withdrawal',
         amount: numericAmount,
         status: 'completed',
         plan: `${finalReason} (${adjustmentFormatted})`,
-        date: createdAt,
-      };
-      db.transactions.unshift(ledgerItem);
+        date: now.toISOString(),
+      });
 
-      // Record notification
       const notifId = `notif_${Math.floor(10000 + Math.random() * 90000)}`;
-      const notif: NotificationItem = {
-        id: notifId,
-        userId: user.id,
+      await NotificationModel.create({
+        notificationId: notifId,
+        userId: user.userId,
         title: isIncrement ? 'Funds Added to Wallet' : 'Funds Deducted from Wallet',
         message: `An administrative balance adjustment of ${adjustmentFormatted} USD was applied to your account. New Balance: $${user.balance.toFixed(2)} USD.`,
         type: isIncrement ? 'deposit' : 'withdrawal',
         isRead: false,
-        createdAt,
-      };
-      db.notifications.set(notifId, notif);
+      });
 
       return {
         success: true,
         message: `User balance ${isIncrement ? 'incremented' : 'decremented'} successfully`,
         data: {
-          userId: user.id,
+          userId: user.userId,
           name: user.name,
           email: user.email,
           previousBalance: Number(previousBalance.toFixed(2)),
@@ -462,7 +720,7 @@ export const resolvers = {
     createSubAdmin: async (
       _: any,
       { fullName, email, password, permissions, role }: any,
-      context: { user?: User }
+      context: { user?: IUserDocument }
     ) => {
       if (!context.user || context.user.role !== 'admin') {
         throw new Error('Forbidden: Only an admin can create sub-admins');
@@ -470,7 +728,7 @@ export const resolvers = {
 
       const cleanEmail = String(email).trim().toLowerCase();
       const cleanPassword = String(password).trim();
-      const existing = db.getUserByEmail(cleanEmail);
+      const existing = await UserModel.findOne({ email: cleanEmail });
       if (existing) {
         throw new Error(`An account with email '${cleanEmail}' already exists`);
       }
@@ -483,8 +741,8 @@ export const resolvers = {
         ? permissions
         : ['deposits', 'withdrawals', 'balance_adjust'];
 
-      const newSubAdmin: User = {
-        id: subAdminId,
+      const newSubAdmin = await UserModel.create({
+        userId: subAdminId,
         name: (fullName || cleanEmail.split('@')[0] || 'Sub Admin').trim(),
         email: cleanEmail,
         passwordHash,
@@ -496,26 +754,7 @@ export const resolvers = {
         currencyPreference: 'USD',
         notifications: { email: true, sms: false, yieldAlerts: true },
         permissions: assignedPermissions,
-        createdAt: new Date().toISOString(),
-      };
-
-      db.users.set(newSubAdmin.id, newSubAdmin);
-      db.saveToDisk();
-
-      try {
-        await UserModel.create({
-          userId: newSubAdmin.id,
-          name: newSubAdmin.name,
-          email: newSubAdmin.email,
-          passwordHash: newSubAdmin.passwordHash,
-          role: newSubAdmin.role,
-          tier: newSubAdmin.tier,
-          balance: newSubAdmin.balance,
-          permissions: newSubAdmin.permissions,
-        });
-      } catch (err) {
-        console.error('Mongoose sub-admin creation sync error:', err);
-      }
+      });
 
       return newSubAdmin;
     },

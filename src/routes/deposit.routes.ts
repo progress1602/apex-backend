@@ -1,138 +1,144 @@
 import { Router, Response } from 'express';
-import { db } from '../store/db';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth';
-import { DepositTransaction, TransactionLedgerItem } from '../types';
 import { DepositModel, TransactionModel } from '../models';
+import { PLATFORM_DEPOSIT_METHODS } from '../config/platform';
 
 const router = Router();
 
 // GET /api/v1/deposits/methods
 router.get('/methods', (_req, res: Response): void => {
   res.status(200).json({
-    methods: db.depositMethods,
+    methods: PLATFORM_DEPOSIT_METHODS,
   });
 });
 
 // GET /api/v1/deposits (Get user's deposits)
-router.get('/', authenticate, (req: AuthenticatedRequest, res: Response): void => {
-  const user = req.user!;
-  const userDeposits = Array.from(db.depositTransactions.values()).filter(
-    (tx) => tx.userId === user.id
-  );
+router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const user = req.user!;
+    const userDeposits = await DepositModel.find({ userId: user.userId }).sort({ createdAt: -1 });
 
-  res.status(200).json({
-    success: true,
-    deposits: userDeposits,
-  });
+    const formatted = userDeposits.map((dep) => ({
+      id: dep.depositId,
+      userId: dep.userId,
+      userName: dep.userName,
+      userEmail: dep.userEmail,
+      type: dep.type,
+      amount: dep.amount,
+      method: dep.method,
+      currency: dep.currency,
+      transactionHash: dep.transactionHash,
+      receiptImage: dep.receiptImage,
+      status: dep.status,
+      createdAt: dep.createdAt.toISOString(),
+    }));
+
+    res.status(200).json({
+      success: true,
+      deposits: formatted,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message || 'Internal error fetching deposits' });
+  }
 });
 
 // GET /api/v1/deposits/:id
-router.get('/:id', authenticate, (req: AuthenticatedRequest, res: Response): void => {
-  const user = req.user!;
-  const id = req.params.id as string;
-  const deposit = db.depositTransactions.get(id);
+router.get('/:id', authenticate, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const user = req.user!;
+    const id = req.params.id as string;
+    const dep = await DepositModel.findOne({ depositId: id, userId: user.userId });
 
-  if (!deposit || deposit.userId !== user.id) {
-    res.status(404).json({ success: false, message: 'Deposit transaction not found' });
-    return;
+    if (!dep) {
+      res.status(404).json({ success: false, message: 'Deposit transaction not found' });
+      return;
+    }
+
+    res.status(200).json({
+      success: true,
+      deposit: {
+        id: dep.depositId,
+        userId: dep.userId,
+        userName: dep.userName,
+        userEmail: dep.userEmail,
+        type: dep.type,
+        amount: dep.amount,
+        method: dep.method,
+        currency: dep.currency,
+        transactionHash: dep.transactionHash,
+        receiptImage: dep.receiptImage,
+        status: dep.status,
+        createdAt: dep.createdAt.toISOString(),
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message || 'Internal error fetching deposit' });
   }
-
-  res.status(200).json({
-    success: true,
-    deposit,
-  });
 });
 
 // POST /api/v1/deposits
-router.post('/', authenticate, (req: AuthenticatedRequest, res: Response): void => {
-  const user = req.user!;
-  const { method, amount, currency, transactionHash, receiptImage, proofImage } = req.body;
-
-  const numericAmount = Number(amount);
-  if (!numericAmount || isNaN(numericAmount) || numericAmount <= 0) {
-    res.status(400).json({ success: false, message: 'Valid deposit amount is required' });
-    return;
-  }
-
-  const selectedMethod = db.depositMethods.find(
-    (m) => m.id.toLowerCase() === (method || 'btc').toLowerCase()
-  );
-  const methodName = selectedMethod ? selectedMethod.name : `${(method || 'BTC').toUpperCase()}`;
-
-  const txId = `tx_dep_${Math.floor(10000 + Math.random() * 90000)}`;
-  const createdAt = new Date().toISOString();
-  const finalReceiptImage = receiptImage || proofImage || '';
-
-  const depositTx: DepositTransaction = {
-    id: txId,
-    userId: user.id,
-    userName: user.name,
-    userEmail: user.email,
-    type: 'deposit',
-    amount: numericAmount,
-    method: methodName,
-    currency: currency || 'USD',
-    transactionHash: transactionHash || `0x${Math.random().toString(16).substring(2, 30)}`,
-    receiptImage: finalReceiptImage,
-    status: 'pending',
-    createdAt,
-  };
-
-  db.depositTransactions.set(txId, depositTx);
-
-  // Add to ledger
-  const ledgerItem: TransactionLedgerItem = {
-    id: txId,
-    userId: user.id,
-    type: 'deposit',
-    amount: numericAmount,
-    status: 'pending',
-    plan: 'Direct Inflow',
-    receiptImage: finalReceiptImage,
-    date: createdAt,
-  };
-  db.transactions.unshift(ledgerItem);
-  db.saveToDisk();
-
+router.post('/', authenticate, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    DepositModel.create({
+    const user = req.user!;
+    const { method, amount, currency, transactionHash, receiptImage, proofImage } = req.body;
+
+    const numericAmount = Number(amount);
+    if (!numericAmount || isNaN(numericAmount) || numericAmount <= 0) {
+      res.status(400).json({ success: false, message: 'Valid deposit amount is required' });
+      return;
+    }
+
+    const selectedMethod = PLATFORM_DEPOSIT_METHODS.find(
+      (m) => m.id.toLowerCase() === (method || 'btc').toLowerCase()
+    );
+    const methodName = selectedMethod ? selectedMethod.name : `${(method || 'BTC').toUpperCase()}`;
+
+    const txId = `tx_dep_${Math.floor(10000 + Math.random() * 90000)}`;
+    const finalReceiptImage = receiptImage || proofImage || '';
+
+    // Persist to MongoDB DepositModel
+    const depositDoc = await DepositModel.create({
       depositId: txId,
-      userId: user.id,
+      userId: user.userId,
       userName: user.name,
       userEmail: user.email,
       type: 'deposit',
       amount: numericAmount,
       method: methodName,
       currency: currency || 'USD',
-      transactionHash: depositTx.transactionHash,
+      transactionHash: transactionHash || `0x${Math.random().toString(16).substring(2, 30)}`,
       receiptImage: finalReceiptImage,
       status: 'pending',
-    }).catch(() => {});
+    });
 
-    TransactionModel.create({
+    // Persist to MongoDB TransactionModel
+    await TransactionModel.create({
       transactionId: txId,
-      userId: user.id,
+      userId: user.userId,
       type: 'deposit',
       amount: numericAmount,
       status: 'pending',
       plan: 'Direct Inflow',
       receiptImage: finalReceiptImage,
-    }).catch(() => {});
-  } catch {}
+      date: depositDoc.createdAt.toISOString(),
+    });
 
-  res.status(201).json({
-    success: true,
-    transaction: {
-      id: depositTx.id,
-      type: depositTx.type,
-      amount: depositTx.amount,
-      method: depositTx.method,
-      transactionHash: depositTx.transactionHash,
-      receiptImage: depositTx.receiptImage,
-      status: depositTx.status,
-      createdAt: depositTx.createdAt,
-    },
-  });
+    res.status(201).json({
+      success: true,
+      transaction: {
+        id: depositDoc.depositId,
+        type: depositDoc.type,
+        amount: depositDoc.amount,
+        method: depositDoc.method,
+        transactionHash: depositDoc.transactionHash,
+        receiptImage: depositDoc.receiptImage,
+        status: depositDoc.status,
+        createdAt: depositDoc.createdAt.toISOString(),
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message || 'Internal error creating deposit' });
+  }
 });
 
 export default router;

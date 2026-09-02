@@ -3,8 +3,8 @@ import { Express, Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { typeDefs } from './schema';
 import { resolvers } from './resolvers';
-import { db } from '../store/db';
-import { AuthTokenPayload, User } from '../types';
+import { UserModel, IUserDocument } from '../models';
+import { AuthTokenPayload } from '../types';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'apexbridge_super_secret_jwt_key_2026_x89f';
 
@@ -51,13 +51,14 @@ export async function setupApolloServer(app: Express) {
 # ========================================================
 # 1. Sign up or Login with your email & password:
 mutation LoginUser {
-  login(email: "your_email@example.com", password: "your_password") {
+  login(email: "admin@apexbridge.com", password: "AdminPassword123!") {
     success
     token
     user {
       id
       name
       email
+      role
       balance
     }
   }
@@ -69,6 +70,7 @@ query GetMyDashboard {
     id
     name
     email
+    role
     tier
     balance
   }
@@ -120,15 +122,15 @@ query GetMyDashboard {
   // Handle GraphQL POST requests
   app.post('/graphql', async (req: Request, res: Response) => {
     const authHeader = req.headers.authorization || req.headers['authorization'] || '';
-    let user: User | undefined = undefined;
+    let user: IUserDocument | null = null;
 
     if (typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
       const token = authHeader.split(' ')[1];
       try {
         const decoded = jwt.verify(token, JWT_SECRET) as AuthTokenPayload;
-        user = db.users.get(decoded.userId);
+        user = await UserModel.findOne({ userId: decoded.userId });
       } catch {
-        // Token invalid, user remains undefined
+        // Token invalid, user remains null
       }
     }
 
@@ -147,7 +149,7 @@ query GetMyDashboard {
           operationName,
         },
         {
-          contextValue: { user },
+          contextValue: { user: user || undefined },
         }
       );
 

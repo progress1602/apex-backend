@@ -1,45 +1,70 @@
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
-import { UserModel } from '../models/User.model';
-import { db } from '../store/db';
-import { User } from '../types';
+import { UserModel, PlanModel } from '../models';
+import { PLATFORM_DEFAULT_PLANS } from './platform';
 
 export async function connectDatabase(): Promise<typeof mongoose> {
-  const mongoUri = process.env.MONGODB_URI;
-
-  if (mongoUri) {
-    try {
-      console.log('Connecting to MongoDB via MONGODB_URI...');
-      await mongoose.connect(mongoUri, {
-        serverSelectionTimeoutMS: 5000,
-      });
-      console.log('✅ Connected to MongoDB successfully!');
-    } catch (err) {
-      console.warn('⚠️ Direct MongoDB connection failed, starting embedded MongoDB instance...', err);
-      await startEmbeddedMongo();
-    }
-  } else {
-    console.log('ℹ️ No MONGODB_URI provided in environment. Starting embedded MongoDB instance...');
-    await startEmbeddedMongo();
+  if (mongoose.connection.readyState === 1) {
+    return mongoose;
   }
 
-  // Seed Admin and sync existing documents into in-memory store
+  const mongoUri = process.env.MONGODB_URI;
+  const isProduction = process.env.NODE_ENV === 'production';
+  const isTest = process.env.NODE_ENV === 'test';
+
+  if (!mongoUri) {
+    if (isProduction) {
+      console.error('❌ FATAL: MONGODB_URI environment variable is required in production.');
+      throw new Error('FATAL: MONGODB_URI environment variable is missing. ApexBridge requires a valid MongoDB Atlas connection string to start in production.');
+    }
+
+    if (isTest) {
+      console.log('🧪 NODE_ENV=test detected without MONGODB_URI. Initializing isolated MongoMemoryServer for tests...');
+      await startEmbeddedMongo();
+    } else {
+      // Local development without MONGODB_URI
+      console.warn('⚠️ MONGODB_URI not found in local environment. Attempting local MongoDB at mongodb://127.0.0.1:27017/apexbridge...');
+      try {
+        await mongoose.connect('mongodb://127.0.0.1:27017/apexbridge', {
+          serverSelectionTimeoutMS: 3000,
+        });
+      } catch (localErr) {
+        console.warn('Local MongoDB daemon not reachable. Starting isolated MongoMemoryServer for development...');
+        await startEmbeddedMongo();
+      }
+    }
+  } else {
+    try {
+      await mongoose.connect(mongoUri, {
+        serverSelectionTimeoutMS: 10000,
+      });
+    } catch (err: any) {
+      console.error('❌ FATAL: Could not connect to MongoDB Atlas with the provided MONGODB_URI.');
+      throw new Error(`MongoDB connection failed: ${err?.message || err}`);
+    }
+  }
+
+  // Safe connection logging (Strictly sanitizes secrets and credentials)
+  const dbName = mongoose.connection.name || 'apexbridge';
+  const isAtlas = mongoUri ? mongoUri.includes('mongodb.net') : false;
+  console.log('-------------------------------------------------------');
+  console.log('MongoDB: connected');
+  console.log(`Database: ${dbName}`);
+  console.log(`Storage: ${isAtlas ? 'MongoDB Atlas' : 'MongoDB'}`);
+  console.log('-------------------------------------------------------');
+
+  // Seed default admin and platform plans in MongoDB
   await seedAdminUser();
-  await syncMongooseToStore();
+  await seedPlatformPlans();
 
   return mongoose;
 }
 
 async function startEmbeddedMongo() {
-  try {
-    const { MongoMemoryServer } = await import('mongodb-memory-server');
-    const mongod = await MongoMemoryServer.create();
-    const uri = mongod.getUri();
-    await mongoose.connect(uri);
-    console.log(`✅ Embedded MongoDB running and connected at ${uri}`);
-  } catch (e) {
-    console.error('Failed to start embedded MongoDB:', e);
-  }
+  const { MongoMemoryServer } = await import('mongodb-memory-server');
+  const mongod = await MongoMemoryServer.create();
+  const uri = mongod.getUri();
+  await mongoose.connect(uri);
 }
 
 export async function seedAdminUser() {
@@ -53,7 +78,7 @@ export async function seedAdminUser() {
       const passwordHash = bcrypt.hashSync(adminPassword, salt);
       const adminId = 'usr_admin_001';
 
-      const adminUser = await UserModel.create({
+      await UserModel.create({
         userId: adminId,
         name: 'ApexBridge Super Admin',
         email: adminEmail,
@@ -72,68 +97,23 @@ export async function seedAdminUser() {
         permissions: ['*'],
       });
 
-      console.log(`👑 Seeded default Super Admin user: ${adminEmail} / ${adminPassword}`);
-
-      // Add to store
-      const userObj: User = {
-        id: adminUser.userId,
-        name: adminUser.name,
-        email: adminUser.email,
-        passwordHash: adminUser.passwordHash,
-        role: 'admin',
-        tier: adminUser.tier,
-        balance: adminUser.balance,
-        phone: adminUser.phone,
-        is2FAEnabled: adminUser.is2FAEnabled,
-        currencyPreference: adminUser.currencyPreference,
-        notifications: adminUser.notifications,
-        createdAt: adminUser.createdAt.toISOString(),
-      };
-      db.users.set(userObj.id, userObj);
-    } else {
-      console.log(`👑 Admin user already present in MongoDB: ${adminEmail}`);
-      const userObj: User = {
-        id: existingAdmin.userId,
-        name: existingAdmin.name,
-        email: existingAdmin.email,
-        passwordHash: existingAdmin.passwordHash,
-        role: existingAdmin.role as any,
-        tier: existingAdmin.tier,
-        balance: existingAdmin.balance,
-        phone: existingAdmin.phone,
-        is2FAEnabled: existingAdmin.is2FAEnabled,
-        currencyPreference: existingAdmin.currencyPreference,
-        notifications: existingAdmin.notifications,
-        createdAt: existingAdmin.createdAt.toISOString(),
-      };
-      db.users.set(userObj.id, userObj);
+      console.log(`👑 Super Admin account seeded in MongoDB Atlas: ${adminEmail}`);
     }
   } catch (err) {
     console.error('Error during admin seeding:', err);
   }
 }
 
-export async function syncMongooseToStore() {
+export async function seedPlatformPlans() {
   try {
-    const users = await UserModel.find();
-    for (const u of users) {
-      db.users.set(u.userId, {
-        id: u.userId,
-        name: u.name,
-        email: u.email,
-        passwordHash: u.passwordHash,
-        role: u.role as any,
-        tier: u.tier,
-        balance: u.balance,
-        phone: u.phone,
-        is2FAEnabled: u.is2FAEnabled,
-        currencyPreference: u.currencyPreference,
-        notifications: u.notifications,
-        createdAt: u.createdAt.toISOString(),
-      });
+    const planCount = await PlanModel.countDocuments();
+    if (planCount === 0) {
+      for (const p of PLATFORM_DEFAULT_PLANS) {
+        await PlanModel.create(p);
+      }
+      console.log('📋 Default investment plans initialized in MongoDB Atlas');
     }
-    console.log(`📦 Synchronized ${users.length} users from MongoDB to active cache`);
   } catch (err) {
-    console.error('Error syncing MongoDB to store:', err);
+    console.error('Error during platform plan seeding:', err);
   }
 }

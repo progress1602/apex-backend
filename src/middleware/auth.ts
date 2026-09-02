@@ -1,19 +1,19 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { db } from '../store/db';
-import { User, AuthTokenPayload } from '../types';
+import { UserModel, IUserDocument } from '../models';
+import { AuthTokenPayload } from '../types';
 
 export interface AuthenticatedRequest extends Request {
-  user?: User;
+  user?: IUserDocument;
   tokenPayload?: AuthTokenPayload;
 }
 
 const JWT_SECRET = process.env.JWT_SECRET || 'apexbridge_super_secret_jwt_key_2026_x89f';
 
-export const generateToken = (user: User): string => {
+export const generateToken = (user: { userId?: string; id?: string; email: string; role: string }): string => {
   return jwt.sign(
     {
-      userId: user.id,
+      userId: user.userId || user.id,
       email: user.email,
       role: user.role,
     },
@@ -22,11 +22,11 @@ export const generateToken = (user: User): string => {
   );
 };
 
-export const authenticate = (
+export const authenticate = async (
   req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
-): void => {
+): Promise<void> => {
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -41,9 +41,9 @@ export const authenticate = (
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET) as AuthTokenPayload;
-    const user = db.users.get(decoded.userId);
+    const user = await UserModel.findOne({ userId: decoded.userId });
     if (!user) {
-      res.status(401).json({ success: false, message: 'Unauthorized: User not found' });
+      res.status(401).json({ success: false, message: 'Unauthorized: User not found in database' });
       return;
     }
     req.user = user;
@@ -54,12 +54,12 @@ export const authenticate = (
   }
 };
 
-export const requireAdmin = (
+export const requireAdmin = async (
   req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
-): void => {
-  authenticate(req, res, () => {
+): Promise<void> => {
+  await authenticate(req, res, () => {
     if (!req.user || req.user.role !== 'admin') {
       res.status(403).json({
         success: false,

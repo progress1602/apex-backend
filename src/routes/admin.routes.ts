@@ -1,253 +1,228 @@
 import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
-import { db } from '../store/db';
 import { requireAdmin, AuthenticatedRequest } from '../middleware/auth';
-import { TransactionLedgerItem, NotificationItem, User } from '../types';
-import { UserModel, DepositModel, WithdrawalModel, TransactionModel, NotificationModel } from '../models';
+import {
+  UserModel,
+  DepositModel,
+  WithdrawalModel,
+  TransactionModel,
+  NotificationModel,
+  PlanModel,
+} from '../models';
 
 const router = Router();
 
 // GET /api/v1/admin/users (Admin list all registered users and their balances)
-router.get('/users', (_req: Request, res: Response): void => {
-  const usersList = Array.from(db.users.values()).map((user) => ({
-    id: user.id,
-    name: user.name,
-    email: user.email,
-    role: user.role,
-    tier: user.tier,
-    balance: Number(user.balance.toFixed(2)),
-    phone: user.phone || '',
-    is2FAEnabled: user.is2FAEnabled,
-    permissions: user.permissions || [],
-    createdAt: user.createdAt,
-  }));
+router.get('/users', async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const users = await UserModel.find().sort({ createdAt: -1 });
+    const usersList = users.map((user) => ({
+      id: user.userId,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      tier: user.tier,
+      balance: Number(user.balance.toFixed(2)),
+      phone: user.phone || '',
+      is2FAEnabled: user.is2FAEnabled,
+      permissions: user.permissions || [],
+      createdAt: user.createdAt.toISOString(),
+    }));
 
-  res.status(200).json({
-    success: true,
-    total: usersList.length,
-    users: usersList,
-  });
+    res.status(200).json({
+      success: true,
+      total: usersList.length,
+      users: usersList,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message || 'Internal error listing users' });
+  }
 });
 
 // GET /api/v1/admin/sub-admins (List all sub-admins and admins)
-router.get('/sub-admins', requireAdmin, (_req: AuthenticatedRequest, res: Response): void => {
-  const subAdmins = Array.from(db.users.values())
-    .filter((u) => u.role === 'admin' || u.role === 'sub-admin')
-    .map((u) => ({
-      id: u.id,
+router.get('/sub-admins', requireAdmin, async (_req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const subAdmins = await UserModel.find({ role: { $in: ['admin', 'sub-admin'] } }).sort({ createdAt: -1 });
+    const formatted = subAdmins.map((u) => ({
+      id: u.userId,
       name: u.name,
       email: u.email,
       role: u.role,
       permissions: u.permissions || ['all'],
-      createdAt: u.createdAt,
+      createdAt: u.createdAt.toISOString(),
     }));
 
-  res.status(200).json({
-    success: true,
-    total: subAdmins.length,
-    subAdmins,
-  });
+    res.status(200).json({
+      success: true,
+      total: formatted.length,
+      subAdmins: formatted,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message || 'Internal error fetching sub-admins' });
+  }
 });
 
 // POST /api/v1/admin/sub-admins (ONLY an Admin can create sub-admins)
 router.post('/sub-admins', requireAdmin, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-  const { fullName, name, email, password, permissions, role } = req.body;
-
-  if (!email || !password) {
-    res.status(400).json({ success: false, message: 'Email and password are required to create a sub-admin' });
-    return;
-  }
-
-  const cleanEmail = String(email).trim().toLowerCase();
-  const cleanPassword = String(password).trim();
-
-  const existingUser = db.getUserByEmail(cleanEmail);
-  if (existingUser) {
-    res.status(409).json({ success: false, message: `An account with email '${cleanEmail}' already exists` });
-    return;
-  }
-
-  const salt = bcrypt.genSaltSync(10);
-  const passwordHash = bcrypt.hashSync(cleanPassword, salt);
-  const subAdminId = `usr_subadmin_${Math.floor(10000 + Math.random() * 90000)}`;
-  const subAdminRole = role === 'admin' ? 'admin' : 'sub-admin';
-  const assignedPermissions = Array.isArray(permissions) && permissions.length > 0
-    ? permissions
-    : ['deposits', 'withdrawals', 'balance_adjust'];
-
-  const newSubAdmin: User = {
-    id: subAdminId,
-    name: (fullName || name || cleanEmail.split('@')[0] || 'Sub Admin').trim(),
-    email: cleanEmail,
-    passwordHash,
-    role: subAdminRole,
-    tier: 'Admin Staff Core',
-    balance: 0.0,
-    phone: '',
-    is2FAEnabled: false,
-    currencyPreference: 'USD',
-    notifications: { email: true, sms: false, yieldAlerts: true },
-    permissions: assignedPermissions,
-    createdAt: new Date().toISOString(),
-  };
-
-  // Save to in-memory store & disk
-  db.users.set(newSubAdmin.id, newSubAdmin);
-  db.saveToDisk();
-
-  // Save to MongoDB Mongoose Model
   try {
-    await UserModel.create({
-      userId: newSubAdmin.id,
-      name: newSubAdmin.name,
-      email: newSubAdmin.email,
-      passwordHash: newSubAdmin.passwordHash,
-      role: newSubAdmin.role,
-      tier: newSubAdmin.tier,
-      balance: newSubAdmin.balance,
-      permissions: newSubAdmin.permissions,
-    });
-  } catch (err) {
-    console.error('Mongoose sub-admin creation sync error:', err);
-  }
+    const { fullName, name, email, password, permissions, role } = req.body;
 
-  res.status(201).json({
-    success: true,
-    message: 'Sub-admin created successfully by Admin',
-    subAdmin: {
-      id: newSubAdmin.id,
-      name: newSubAdmin.name,
-      email: newSubAdmin.email,
-      role: newSubAdmin.role,
-      permissions: newSubAdmin.permissions,
-      createdAt: newSubAdmin.createdAt,
-    },
-  });
+    if (!email || !password) {
+      res.status(400).json({ success: false, message: 'Email and password are required to create a sub-admin' });
+      return;
+    }
+
+    const cleanEmail = String(email).trim().toLowerCase();
+    const cleanPassword = String(password).trim();
+
+    const existingUser = await UserModel.findOne({ email: cleanEmail });
+    if (existingUser) {
+      res.status(409).json({ success: false, message: `An account with email '${cleanEmail}' already exists` });
+      return;
+    }
+
+    const salt = bcrypt.genSaltSync(10);
+    const passwordHash = bcrypt.hashSync(cleanPassword, salt);
+    const subAdminId = `usr_subadmin_${Math.floor(10000 + Math.random() * 90000)}`;
+    const subAdminRole = role === 'admin' ? 'admin' : 'sub-admin';
+    const assignedPermissions = Array.isArray(permissions) && permissions.length > 0
+      ? permissions
+      : ['deposits', 'withdrawals', 'balance_adjust'];
+
+    const newSubAdmin = await UserModel.create({
+      userId: subAdminId,
+      name: (fullName || name || cleanEmail.split('@')[0] || 'Sub Admin').trim(),
+      email: cleanEmail,
+      passwordHash,
+      role: subAdminRole,
+      tier: 'Admin Staff Core',
+      balance: 0.0,
+      phone: '',
+      is2FAEnabled: false,
+      currencyPreference: 'USD',
+      notifications: { email: true, sms: false, yieldAlerts: true },
+      permissions: assignedPermissions,
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Sub-admin created successfully by Admin',
+      subAdmin: {
+        id: newSubAdmin.userId,
+        name: newSubAdmin.name,
+        email: newSubAdmin.email,
+        role: newSubAdmin.role,
+        permissions: newSubAdmin.permissions,
+        createdAt: newSubAdmin.createdAt.toISOString(),
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message || 'Internal error creating sub-admin' });
+  }
 });
 
 // POST /api/v1/admin/users/balance (Admin increment/decrement user balance by email)
 router.post('/users/balance', async (req: Request, res: Response): Promise<void> => {
-  const { email, action, amount, reason } = req.body;
-
-  if (!email) {
-    res.status(400).json({ success: false, message: 'User email is required' });
-    return;
-  }
-
-  const user = db.getUserByEmail(email);
-  if (!user) {
-    res.status(404).json({ success: false, message: `User with email '${email}' not found` });
-    return;
-  }
-
-  const numericAmount = Number(amount);
-  if (isNaN(numericAmount) || numericAmount <= 0) {
-    res.status(400).json({ success: false, message: 'Valid positive amount is required' });
-    return;
-  }
-
-  const normalizedAction = (action || '').toLowerCase().trim();
-  const validActions = ['increment', 'add', 'decrement', 'deduct', 'subtract'];
-  if (!validActions.includes(normalizedAction)) {
-    res.status(400).json({
-      success: false,
-      message: "Valid action is required: 'increment' (or 'add') | 'decrement' (or 'deduct')",
-    });
-    return;
-  }
-
-  const previousBalance = user.balance;
-  const isIncrement = normalizedAction === 'increment' || normalizedAction === 'add';
-
-  if (isIncrement) {
-    user.balance = Number((user.balance + numericAmount).toFixed(2));
-  } else {
-    user.balance = Number(Math.max(0, user.balance - numericAmount).toFixed(2));
-  }
-
-  const adjustmentFormatted = isIncrement
-    ? `+$${numericAmount.toFixed(2)}`
-    : `-$${numericAmount.toFixed(2)}`;
-  const finalReason = reason || (isIncrement ? 'Admin Balance Credit' : 'Admin Balance Debit');
-  const txId = `tx_adj_${Math.floor(10000 + Math.random() * 90000)}`;
-  const createdAt = new Date().toISOString();
-
-  // Record ledger entry
-  const ledgerItem: TransactionLedgerItem = {
-    id: txId,
-    userId: user.id,
-    type: isIncrement ? 'deposit' : 'withdrawal',
-    amount: numericAmount,
-    status: 'completed',
-    plan: `${finalReason} (${adjustmentFormatted})`,
-    date: createdAt,
-  };
-  db.transactions.unshift(ledgerItem);
-
-  // Send user alert notification
-  const notifId = `notif_${Math.floor(10000 + Math.random() * 90000)}`;
-  const notif: NotificationItem = {
-    id: notifId,
-    userId: user.id,
-    title: isIncrement ? 'Funds Added to Wallet' : 'Funds Deducted from Wallet',
-    message: `An administrative balance adjustment of ${adjustmentFormatted} USD was applied to your account. New Balance: $${user.balance.toFixed(2)} USD.`,
-    type: isIncrement ? 'deposit' : 'withdrawal',
-    isRead: false,
-    createdAt,
-  };
-  db.notifications.set(notifId, notif);
-  db.saveToDisk();
-
-  // Sync to MongoDB Mongoose Models
   try {
-    await UserModel.findOneAndUpdate({ userId: user.id }, { balance: user.balance });
+    const { email, action, amount, reason } = req.body;
+
+    if (!email) {
+      res.status(400).json({ success: false, message: 'User email is required' });
+      return;
+    }
+
+    const cleanEmail = String(email).trim().toLowerCase();
+    const user = await UserModel.findOne({ email: cleanEmail });
+    if (!user) {
+      res.status(404).json({ success: false, message: `User with email '${cleanEmail}' not found` });
+      return;
+    }
+
+    const numericAmount = Number(amount);
+    if (isNaN(numericAmount) || numericAmount <= 0) {
+      res.status(400).json({ success: false, message: 'Valid positive amount is required' });
+      return;
+    }
+
+    const normalizedAction = (action || '').toLowerCase().trim();
+    const validActions = ['increment', 'add', 'decrement', 'deduct', 'subtract'];
+    if (!validActions.includes(normalizedAction)) {
+      res.status(400).json({
+        success: false,
+        message: "Valid action is required: 'increment' (or 'add') | 'decrement' (or 'deduct')",
+      });
+      return;
+    }
+
+    const previousBalance = user.balance;
+    const isIncrement = normalizedAction === 'increment' || normalizedAction === 'add';
+
+    if (isIncrement) {
+      user.balance = Number((user.balance + numericAmount).toFixed(2));
+    } else {
+      user.balance = Number(Math.max(0, user.balance - numericAmount).toFixed(2));
+    }
+
+    await user.save();
+
+    const adjustmentFormatted = isIncrement
+      ? `+$${numericAmount.toFixed(2)}`
+      : `-$${numericAmount.toFixed(2)}`;
+    const finalReason = reason || (isIncrement ? 'Admin Balance Credit' : 'Admin Balance Debit');
+    const txId = `tx_adj_${Math.floor(10000 + Math.random() * 90000)}`;
+    const now = new Date();
+
+    // Persist transaction record to MongoDB
     await TransactionModel.create({
       transactionId: txId,
-      userId: user.id,
-      type: ledgerItem.type,
-      amount: ledgerItem.amount,
-      status: ledgerItem.status,
-      plan: ledgerItem.plan,
-      date: ledgerItem.date,
+      userId: user.userId,
+      type: isIncrement ? 'deposit' : 'withdrawal',
+      amount: numericAmount,
+      status: 'completed',
+      plan: `${finalReason} (${adjustmentFormatted})`,
+      date: now.toISOString(),
     });
+
+    // Persist notification to MongoDB
+    const notifId = `notif_${Math.floor(10000 + Math.random() * 90000)}`;
     await NotificationModel.create({
       notificationId: notifId,
-      userId: user.id,
-      title: notif.title,
-      message: notif.message,
-      type: notif.type,
+      userId: user.userId,
+      title: isIncrement ? 'Funds Added to Wallet' : 'Funds Deducted from Wallet',
+      message: `An administrative balance adjustment of ${adjustmentFormatted} USD was applied to your account. New Balance: $${user.balance.toFixed(2)} USD.`,
+      type: isIncrement ? 'deposit' : 'withdrawal',
       isRead: false,
     });
-  } catch (err) {
-    console.error('Mongoose balance sync error:', err);
-  }
 
-  res.status(200).json({
-    success: true,
-    message: `User balance ${isIncrement ? 'incremented' : 'decremented'} successfully`,
-    data: {
-      userId: user.id,
-      name: user.name,
-      email: user.email,
-      previousBalance: Number(previousBalance.toFixed(2)),
-      newBalance: Number(user.balance.toFixed(2)),
-      action: isIncrement ? 'increment' : 'decrement',
-      amount: Number(numericAmount.toFixed(2)),
-      reason: finalReason,
-      transactionId: txId,
-    },
-  });
+    res.status(200).json({
+      success: true,
+      message: `User balance ${isIncrement ? 'incremented' : 'decremented'} successfully`,
+      data: {
+        userId: user.userId,
+        name: user.name,
+        email: user.email,
+        previousBalance: Number(previousBalance.toFixed(2)),
+        newBalance: Number(user.balance.toFixed(2)),
+        action: isIncrement ? 'increment' : 'decrement',
+        amount: Number(numericAmount.toFixed(2)),
+        reason: finalReason,
+        transactionId: txId,
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message || 'Internal error adjusting balance' });
+  }
 });
 
 // GET /api/v1/admin/deposits (Admin list all user deposits with receipt proof)
-router.get('/deposits', (_req: Request, res: Response): void => {
-  const allDeposits = Array.from(db.depositTransactions.values()).map((dep) => {
-    const user = db.users.get(dep.userId);
-    return {
-      id: dep.id,
+router.get('/deposits', async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const allDeposits = await DepositModel.find().sort({ createdAt: -1 });
+    const formatted = allDeposits.map((dep) => ({
+      id: dep.depositId,
       userId: dep.userId,
-      userName: user ? user.name : dep.userName || 'Investor',
-      userEmail: user ? user.email : dep.userEmail || '',
+      userName: dep.userName || 'Investor',
+      userEmail: dep.userEmail || '',
       type: dep.type,
       amount: dep.amount,
       method: dep.method,
@@ -255,191 +230,229 @@ router.get('/deposits', (_req: Request, res: Response): void => {
       transactionHash: dep.transactionHash,
       receiptImage: dep.receiptImage || '',
       status: dep.status,
-      createdAt: dep.createdAt,
-    };
-  });
+      createdAt: dep.createdAt.toISOString(),
+    }));
 
-  res.status(200).json({
-    success: true,
-    total: allDeposits.length,
-    deposits: allDeposits,
-  });
+    res.status(200).json({
+      success: true,
+      total: formatted.length,
+      deposits: formatted,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message || 'Internal error fetching deposits' });
+  }
 });
 
 // GET /api/v1/admin/deposits/:id (Admin get specific deposit with receipt)
-router.get('/deposits/:id', (req: Request, res: Response): void => {
-  const id = req.params.id as string;
-  const dep = db.depositTransactions.get(id);
+router.get('/deposits/:id', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const id = req.params.id as string;
+    const dep = await DepositModel.findOne({ depositId: id });
 
-  if (!dep) {
-    res.status(404).json({ success: false, message: 'Deposit transaction not found' });
-    return;
+    if (!dep) {
+      res.status(404).json({ success: false, message: 'Deposit transaction not found' });
+      return;
+    }
+
+    res.status(200).json({
+      success: true,
+      deposit: {
+        id: dep.depositId,
+        userId: dep.userId,
+        userName: dep.userName || 'Investor',
+        userEmail: dep.userEmail || '',
+        type: dep.type,
+        amount: dep.amount,
+        method: dep.method,
+        currency: dep.currency,
+        transactionHash: dep.transactionHash,
+        receiptImage: dep.receiptImage || '',
+        status: dep.status,
+        createdAt: dep.createdAt.toISOString(),
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message || 'Internal error fetching deposit' });
   }
-
-  const user = db.users.get(dep.userId);
-  res.status(200).json({
-    success: true,
-    deposit: {
-      id: dep.id,
-      userId: dep.userId,
-      userName: user ? user.name : dep.userName || 'Investor',
-      userEmail: user ? user.email : dep.userEmail || '',
-      type: dep.type,
-      amount: dep.amount,
-      method: dep.method,
-      currency: dep.currency,
-      transactionHash: dep.transactionHash,
-      receiptImage: dep.receiptImage || '',
-      status: dep.status,
-      createdAt: dep.createdAt,
-    },
-  });
 });
 
 // PATCH /api/v1/admin/deposits/:id/status
 router.patch('/deposits/:id/status', async (req: Request, res: Response): Promise<void> => {
-  const id = req.params.id as string;
-  const { status } = req.body;
+  try {
+    const id = req.params.id as string;
+    const { status } = req.body;
 
-  const validStatuses = ['pending', 'approved', 'rejected'];
-  if (!status || !validStatuses.includes(status.toLowerCase())) {
-    res.status(400).json({ success: false, message: 'Valid status (pending | approved | rejected) is required' });
-    return;
-  }
+    const validStatuses = ['pending', 'approved', 'rejected'];
+    if (!status || !validStatuses.includes(status.toLowerCase())) {
+      res.status(400).json({ success: false, message: 'Valid status (pending | approved | rejected) is required' });
+      return;
+    }
 
-  const deposit = db.depositTransactions.get(id);
-  let receiptImage = '';
+    const deposit = await DepositModel.findOne({ depositId: id });
+    if (!deposit) {
+      res.status(404).json({ success: false, message: 'Deposit not found' });
+      return;
+    }
 
-  if (deposit) {
     const prevStatus = deposit.status;
-    deposit.status = status.toLowerCase() as 'pending' | 'approved' | 'rejected';
-    receiptImage = deposit.receiptImage || '';
+    const targetStatus = status.toLowerCase() as 'pending' | 'approved' | 'rejected';
+    deposit.status = targetStatus;
+    await deposit.save();
 
-    // If newly approved, credit the user balance
-    if (prevStatus !== 'approved' && deposit.status === 'approved') {
-      const user = db.users.get(deposit.userId);
-      if (user) {
-        user.balance = Number((user.balance + deposit.amount).toFixed(2));
-        UserModel.findOneAndUpdate({ userId: user.id }, { balance: user.balance }).catch(() => {});
-      }
+    // If newly approved, credit the user balance in MongoDB
+    if (prevStatus !== 'approved' && targetStatus === 'approved') {
+      await UserModel.findOneAndUpdate(
+        { userId: deposit.userId },
+        { $inc: { balance: deposit.amount } }
+      );
     }
 
-    // Update in ledger
-    const ledger = db.transactions.find((tx) => tx.id === id);
-    if (ledger) {
-      ledger.status = deposit.status;
-    }
+    // Update in MongoDB TransactionModel
+    await TransactionModel.findOneAndUpdate(
+      { transactionId: id },
+      { status: targetStatus }
+    );
 
-    DepositModel.findOneAndUpdate({ depositId: id }, { status: deposit.status }).catch(() => {});
+    res.status(200).json({
+      success: true,
+      transactionId: id,
+      status: targetStatus,
+      receiptImage: deposit.receiptImage || '',
+      deposit: {
+        id: deposit.depositId,
+        amount: deposit.amount,
+        status: deposit.status,
+        receiptImage: deposit.receiptImage,
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message || 'Internal error updating deposit status' });
   }
-
-  db.saveToDisk();
-
-  res.status(200).json({
-    success: true,
-    transactionId: id,
-    status: status.toLowerCase(),
-    receiptImage,
-    deposit: deposit || null,
-  });
 });
 
 // GET /api/v1/admin/withdrawals (Admin list all withdrawals)
-router.get('/withdrawals', (_req: Request, res: Response): void => {
-  const allWithdrawals = Array.from(db.withdrawalTransactions.values()).map((wdr) => {
-    const user = db.users.get(wdr.userId);
-    return {
-      ...wdr,
-      userName: user ? user.name : wdr.userName || 'Investor',
-      userEmail: user ? user.email : wdr.userEmail || '',
-    };
-  });
+router.get('/withdrawals', async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const allWithdrawals = await WithdrawalModel.find().sort({ createdAt: -1 });
+    const formatted = allWithdrawals.map((wdr) => ({
+      id: wdr.withdrawalId,
+      userId: wdr.userId,
+      userName: wdr.userName || 'Investor',
+      userEmail: wdr.userEmail || '',
+      type: wdr.type,
+      amount: wdr.amount,
+      fee: wdr.fee,
+      netPayout: wdr.netPayout,
+      method: wdr.method,
+      destinationAddress: wdr.destinationAddress,
+      status: wdr.status,
+      txHash: wdr.txHash || '',
+      createdAt: wdr.createdAt.toISOString(),
+    }));
 
-  res.status(200).json({
-    success: true,
-    total: allWithdrawals.length,
-    withdrawals: allWithdrawals,
-  });
+    res.status(200).json({
+      success: true,
+      total: formatted.length,
+      withdrawals: formatted,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message || 'Internal error fetching withdrawals' });
+  }
 });
 
 // PATCH /api/v1/admin/withdrawals/:id/status
 router.patch('/withdrawals/:id/status', async (req: Request, res: Response): Promise<void> => {
-  const id = req.params.id as string;
-  const { status, txHash } = req.body;
+  try {
+    const id = req.params.id as string;
+    const { status, txHash } = req.body;
 
-  const validStatuses = ['pending', 'processed', 'approved', 'rejected'];
-  if (!status || !validStatuses.includes(status.toLowerCase())) {
-    res.status(400).json({ success: false, message: 'Valid status (pending | processed | approved | rejected) is required' });
-    return;
+    const validStatuses = ['pending', 'processed', 'approved', 'rejected'];
+    if (!status || !validStatuses.includes(status.toLowerCase())) {
+      res.status(400).json({ success: false, message: 'Valid status (pending | processed | approved | rejected) is required' });
+      return;
+    }
+
+    const withdrawal = await WithdrawalModel.findOne({ withdrawalId: id });
+    if (!withdrawal) {
+      res.status(404).json({ success: false, message: 'Withdrawal not found' });
+      return;
+    }
+
+    const prevStatus = withdrawal.status;
+    const targetStatus = status.toLowerCase() as 'pending' | 'processed' | 'rejected';
+    withdrawal.status = targetStatus;
+    if (txHash) withdrawal.txHash = txHash;
+    await withdrawal.save();
+
+    // If rejected, refund balance to user in MongoDB
+    if (prevStatus !== 'rejected' && targetStatus === 'rejected') {
+      await UserModel.findOneAndUpdate(
+        { userId: withdrawal.userId },
+        { $inc: { balance: withdrawal.amount } }
+      );
+    }
+
+    // Update in MongoDB TransactionModel
+    await TransactionModel.findOneAndUpdate(
+      { transactionId: id },
+      { status: targetStatus }
+    );
+
+    res.status(200).json({
+      success: true,
+      transactionId: id,
+      status: targetStatus,
+      withdrawal: {
+        id: withdrawal.withdrawalId,
+        amount: withdrawal.amount,
+        status: withdrawal.status,
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message || 'Internal error updating withdrawal status' });
   }
-
-  const withdrawal = db.withdrawalTransactions.get(id);
-  if (withdrawal) {
-    withdrawal.status = status.toLowerCase() as 'pending' | 'processed' | 'rejected';
-    if (txHash) {
-      withdrawal.txHash = txHash;
-    }
-
-    // If rejected, refund balance to user
-    if (withdrawal.status === 'rejected') {
-      const user = db.users.get(withdrawal.userId);
-      if (user) {
-        user.balance = Number((user.balance + withdrawal.amount).toFixed(2));
-        UserModel.findOneAndUpdate({ userId: user.id }, { balance: user.balance }).catch(() => {});
-      }
-    }
-
-    // Update in ledger
-    const ledger = db.transactions.find((tx) => tx.id === id);
-    if (ledger) {
-      ledger.status = withdrawal.status;
-    }
-
-    WithdrawalModel.findOneAndUpdate({ withdrawalId: id }, { status: withdrawal.status, txHash: withdrawal.txHash }).catch(() => {});
-  }
-
-  db.saveToDisk();
-
-  res.status(200).json({
-    success: true,
-    transactionId: id,
-    status: status.toLowerCase(),
-    withdrawal: withdrawal || null,
-  });
 });
 
 // PUT /api/v1/admin/plans/:id
-router.put('/plans/:id', (req: Request, res: Response): void => {
-  const id = req.params.id as string;
-  const { roi, minAmount, maxAmount, feeRate, name, durationDays, status } = req.body;
+router.put('/plans/:id', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const id = req.params.id as string;
+    const { roi, minAmount, maxAmount, feeRate, name, durationDays, status } = req.body;
 
-  let plan = db.investmentPlans.get(id);
-  if (!plan) {
-    plan = {
-      id,
-      name: name || `Apex Plan ${id.toUpperCase()}`,
-      roi: roi || '15%',
-      durationDays: durationDays || 7,
-      minAmount: minAmount || 500,
-      maxAmount: maxAmount || 10000,
-      feeRate: feeRate || 0.1,
-      status: status || 'active',
-    };
-    db.investmentPlans.set(id, plan);
-  } else {
-    if (roi !== undefined) plan.roi = roi;
-    if (minAmount !== undefined) plan.minAmount = Number(minAmount);
-    if (maxAmount !== undefined) plan.maxAmount = Number(maxAmount);
-    if (feeRate !== undefined) plan.feeRate = Number(feeRate);
-    if (name !== undefined) plan.name = name;
-    if (durationDays !== undefined) plan.durationDays = Number(durationDays);
-    if (status !== undefined) plan.status = status;
+    const updates: Record<string, any> = {};
+    if (roi !== undefined) updates.roi = roi;
+    if (minAmount !== undefined) updates.minAmount = Number(minAmount);
+    if (maxAmount !== undefined) updates.maxAmount = Number(maxAmount);
+    if (feeRate !== undefined) updates.feeRate = Number(feeRate);
+    if (name !== undefined) updates.name = name;
+    if (durationDays !== undefined) updates.durationDays = Number(durationDays);
+    if (status !== undefined) updates.status = status;
+
+    await PlanModel.findOneAndUpdate(
+      { planId: id },
+      {
+        $set: updates,
+        $setOnInsert: {
+          planId: id,
+          name: name || `Apex Plan ${id.toUpperCase()}`,
+          roi: roi || '15%',
+          durationDays: durationDays || 7,
+          minAmount: minAmount || 500,
+          maxAmount: maxAmount || 10000,
+          feeRate: feeRate || 0.1,
+          status: status || 'active',
+        },
+      },
+      { upsert: true, new: true }
+    );
+
+    res.status(200).json({
+      success: true,
+      message: 'Plan configuration updated in MongoDB',
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message || 'Internal error updating plan' });
   }
-
-  res.status(200).json({
-    success: true,
-    message: 'Plan configuration updated',
-  });
 });
 
 export default router;

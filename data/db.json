@@ -20,6 +20,74 @@
         },
         "createdAt": "2026-09-01T01:12:40.181Z"
       }
+    ],
+    [
+      "usr_admin_001",
+      {
+        "id": "usr_admin_001",
+        "name": "ApexBridge Super Admin",
+        "email": "admin@apexbridge.com",
+        "passwordHash": "$2b$10$C4qQx0DPuoZ2oQ5pDK2Cs.4mvewv9ifiMyEto4RQyvYLyOVFshzyW",
+        "role": "admin",
+        "tier": "VIP Sovereign Core",
+        "balance": 100000,
+        "phone": "+1 (800) 555-APEX",
+        "is2FAEnabled": true,
+        "currencyPreference": "USD",
+        "notifications": {
+          "email": true,
+          "sms": true,
+          "yieldAlerts": true
+        },
+        "createdAt": "2026-09-01T09:38:57.548Z"
+      }
+    ],
+    [
+      "usr_9735186",
+      {
+        "id": "usr_9735186",
+        "name": "Standard Investor",
+        "email": "investor_1788255538107@apexbridge.com",
+        "passwordHash": "$2b$10$65W2V3LBRMrvHQlLIZcDIuhYzmS4gYMSpu1vU2D5FnDqxf9xLDoQO",
+        "role": "investor",
+        "tier": "Tier 1 - Standard",
+        "balance": 10000,
+        "phone": "",
+        "is2FAEnabled": false,
+        "currencyPreference": "USD",
+        "notifications": {
+          "email": true,
+          "sms": false,
+          "yieldAlerts": false
+        },
+        "createdAt": "2026-09-01T09:38:58.241Z"
+      }
+    ],
+    [
+      "usr_subadmin_39296",
+      {
+        "id": "usr_subadmin_39296",
+        "name": "Regional Ops SubAdmin",
+        "email": "subadmin_1788255538259@apexbridge.com",
+        "passwordHash": "$2b$10$sqdtAUvbOSqS.nZ6CmdV7OBcJ969Wshz4ipY782WKfFIn8JF7kCX.",
+        "role": "sub-admin",
+        "tier": "Admin Staff Core",
+        "balance": 0,
+        "phone": "",
+        "is2FAEnabled": false,
+        "currencyPreference": "USD",
+        "notifications": {
+          "email": true,
+          "sms": false,
+          "yieldAlerts": true
+        },
+        "permissions": [
+          "deposits",
+          "withdrawals",
+          "balance_adjust"
+        ],
+        "createdAt": "2026-09-01T09:38:58.410Z"
+      }
     ]
   ],
   "depositTransactions": [
@@ -38,6 +106,23 @@
         "receiptImage": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
         "status": "approved",
         "createdAt": "2026-09-01T01:12:40.226Z"
+      }
+    ],
+    [
+      "tx_dep_55462",
+      {
+        "id": "tx_dep_55462",
+        "userId": "usr_9735186",
+        "userName": "Standard Investor",
+        "userEmail": "investor_1788255538107@apexbridge.com",
+        "type": "deposit",
+        "amount": 5000,
+        "method": "Bitcoin (BTC)",
+        "currency": "USD",
+        "transactionHash": "0x123456789abcdef",
+        "receiptImage": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+        "status": "pending",
+        "createdAt": "2026-09-01T09:38:58.645Z"
       }
     ]
   ],
@@ -61,6 +146,34 @@
   ],
   "withdrawalTransactions": [],
   "transactions": [
+    {
+      "id": "tx_dep_55462",
+      "userId": "usr_9735186",
+      "type": "deposit",
+      "amount": 5000,
+      "status": "pending",
+      "plan": "Direct Inflow",
+      "receiptImage": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+      "date": "2026-09-01T09:38:58.645Z"
+    },
+    {
+      "id": "tx_adj_21924",
+      "userId": "usr_9735186",
+      "type": "withdrawal",
+      "amount": 5000,
+      "status": "completed",
+      "plan": "Adjustment (-$5000.00)",
+      "date": "2026-09-01T09:38:58.630Z"
+    },
+    {
+      "id": "tx_adj_92529",
+      "userId": "usr_9735186",
+      "type": "deposit",
+      "amount": 15000,
+      "status": "completed",
+      "plan": "Welcome Bonus (+$15000.00)",
+      "date": "2026-09-01T09:38:58.601Z"
+    },
     {
       "id": "tx_settle_82522",
       "userId": "usr_7887622",
@@ -131,6 +244,30 @@
         "type": "withdrawal",
         "isRead": false,
         "createdAt": "2026-09-01T01:12:40.210Z"
+      }
+    ],
+    [
+      "notif_12831",
+      {
+        "id": "notif_12831",
+        "userId": "usr_9735186",
+        "title": "Funds Added to Wallet",
+        "message": "An administrative balance adjustment of +$15000.00 USD was applied to your account. New Balance: $15000.00 USD.",
+        "type": "deposit",
+        "isRead": false,
+        "createdAt": "2026-09-01T09:38:58.601Z"
+      }
+    ],
+    [
+      "notif_97626",
+      {
+        "id": "notif_97626",
+        "userId": "usr_9735186",
+        "title": "Funds Deducted from Wallet",
+        "message": "An administrative balance adjustment of -$5000.00 USD was applied to your account. New Balance: $10000.00 USD.",
+        "type": "withdrawal",
+        "isRead": false,
+        "createdAt": "2026-09-01T09:38:58.630Z"
       }
     ]
   ]
