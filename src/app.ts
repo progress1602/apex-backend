@@ -137,7 +137,12 @@ app.use('/api/v1/admin', adminRoutes);
 
 // Setup database & Apollo Server on app
 export async function initializeApp() {
-  await connectDatabase();
+  try {
+    await connectDatabase();
+  } catch (error) {
+    console.error('Error initializing database:', error);
+    throw error;
+  }
   await setupApolloServer(app);
   return app;
 }
