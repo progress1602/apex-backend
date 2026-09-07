@@ -6,7 +6,6 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc && node -e \"if (!require('fs').existsSync('dist/swagger')) require('fs').mkdirSync('dist/swagger', {recursive: true}); require('fs').copyFileSync('src/swagger/openapi.json', 'dist/swagger/openapi.json'); console.log('✅ Build completed successfully! Production bundle generated in dist/.');\"",
-    "postinstall": "npm run build",
     "start": "node dist/server.js",
     "migrate:json": "tsx src/scripts/migrate.ts",
     "test": "tsx tests/run-tests.ts && tsx tests/test-restart-persistence.ts"
