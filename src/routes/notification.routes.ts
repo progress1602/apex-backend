@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
-import { authenticate, AuthenticatedRequest } from '../middleware/auth';
+import { authenticate, requireAdmin, AuthenticatedRequest } from '../middleware/auth';
 import { NotificationModel } from '../models';
+import { handleAdminCreateNotification } from './admin.routes';
 
 const router = Router();
 
@@ -15,6 +16,7 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response): 
       title: n.title,
       message: n.message,
       type: n.type,
+      priority: n.priority || 'Standard Information',
       isRead: n.isRead,
       createdAt: n.createdAt.toISOString(),
     }));
@@ -67,5 +69,8 @@ router.post('/mark-all-read', authenticate, async (req: AuthenticatedRequest, re
     res.status(500).json({ success: false, message: err.message || 'Internal error updating notifications' });
   }
 });
+
+// POST /api/v1/notifications/create (Create Notice / Broadcast Message endpoint alias)
+router.post('/create', requireAdmin, handleAdminCreateNotification);
 
 export default router;

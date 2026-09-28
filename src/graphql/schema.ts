@@ -126,11 +126,33 @@ export const typeDefs = `#graphql
 
   type NotificationItem {
     id: ID
+    userId: String
     title: String
     message: String
     type: String
+    priority: String
     isRead: Boolean
     createdAt: String
+  }
+
+  type NotificationRecipientOption {
+    id: String!
+    userId: String!
+    name: String!
+    email: String!
+    role: String!
+    tier: String
+    balance: Float
+  }
+
+  type AdminCreateNotificationResult {
+    success: Boolean!
+    message: String!
+    recipientGroup: String!
+    recipientCount: Int!
+    priority: String!
+    title: String!
+    sampleNotification: NotificationItem
   }
 
   type AdminBalanceAdjustData {
@@ -167,6 +189,8 @@ export const typeDefs = `#graphql
     subAdmins: [User]
     adminDeposits: [DepositTransaction]
     adminWithdrawals: [WithdrawalResult]
+    adminSearchNotificationRecipients(query: String): [NotificationRecipientOption]
+    adminNotifications(page: Int, limit: Int): [NotificationItem]
   }
 
   type Mutation {
@@ -185,5 +209,14 @@ export const typeDefs = `#graphql
     adminAdjustUserBalance(email: String!, action: String!, amount: Float!, reason: String): AdminBalanceAdjustResult
     adminResetUserPassword(userId: String!, newPassword: String!): Boolean
     createSubAdmin(fullName: String, email: String!, password: String!, permissions: [String], role: String): User
+    adminCreateNotification(
+      recipientGroup: String
+      targetIdentity: String
+      targetEmail: String
+      priority: String
+      title: String
+      message: String!
+      type: String
+    ): AdminCreateNotificationResult
   }
 `;

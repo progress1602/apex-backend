@@ -156,9 +156,11 @@ export const resolvers = {
       const notifs = await NotificationModel.find({ userId: context.user.userId }).sort({ createdAt: -1 });
       return notifs.map((n) => ({
         id: n.notificationId,
+        userId: n.userId,
         title: n.title,
         message: n.message,
         type: n.type,
+        priority: n.priority || 'Standard Information',
         isRead: n.isRead,
         createdAt: n.createdAt.toISOString(),
       }));
@@ -250,6 +252,59 @@ export const resolvers = {
         destinationAddress: w.destinationAddress,
         status: w.status,
         createdAt: w.createdAt.toISOString(),
+      }));
+    },
+    adminSearchNotificationRecipients: async (
+      _: any,
+      { query }: { query?: string },
+      context: { user?: IUserDocument }
+    ) => {
+      if (!context.user || (context.user.role !== 'admin' && context.user.role !== 'sub-admin')) {
+        throw new Error('Forbidden: Admin access required');
+      }
+      const q = String(query || '').trim();
+      let filter: any = {};
+      if (q) {
+        const regex = new RegExp(q, 'i');
+        filter = { $or: [{ email: regex }, { name: regex }, { userId: regex }] };
+      }
+      const users = await UserModel.find(filter)
+        .select('userId name email role tier balance')
+        .sort({ createdAt: -1 })
+        .limit(50);
+
+      return users.map((u) => ({
+        id: u.userId,
+        userId: u.userId,
+        name: u.name,
+        email: u.email,
+        role: u.role,
+        tier: u.tier,
+        balance: Number(u.balance.toFixed(2)),
+      }));
+    },
+    adminNotifications: async (
+      _: any,
+      { page, limit }: { page?: number; limit?: number },
+      context: { user?: IUserDocument }
+    ) => {
+      if (!context.user || (context.user.role !== 'admin' && context.user.role !== 'sub-admin')) {
+        throw new Error('Forbidden: Admin access required');
+      }
+      const p = Math.max(1, page || 1);
+      const l = Math.max(1, Math.min(100, limit || 50));
+      const skip = (p - 1) * l;
+
+      const notifs = await NotificationModel.find().sort({ createdAt: -1 }).skip(skip).limit(l);
+      return notifs.map((n) => ({
+        id: n.notificationId,
+        userId: n.userId,
+        title: n.title,
+        message: n.message,
+        type: n.type,
+        priority: n.priority || 'Standard Information',
+        isRead: n.isRead,
+        createdAt: n.createdAt.toISOString(),
       }));
     },
   },
@@ -843,6 +898,125 @@ export const resolvers = {
       });
 
       return newSubAdmin;
+    },
+
+    adminCreateNotification: async (
+      _: any,
+      { recipientGroup, targetIdentity, targetEmail, priority, title, message, type }: any,
+      context: { user?: IUserDocument }
+    ) => {
+      if (!context.user || (context.user.role !== 'admin' && context.user.role !== 'sub-admin')) {
+        throw new Error('Forbidden: Admin access required');
+      }
+
+      if (!message || typeof message !== 'string' || !message.trim()) {
+        throw new Error('Message Body is required. Please enter the notification content here...');
+      }
+
+      const cleanMessage = String(message).trim();
+      const cleanTitle = String(title || 'Broadcast Message').trim();
+      const cleanPriority = String(priority || 'Standard Information').trim();
+      const cleanType = String(type || 'broadcast').trim();
+
+      const rawGroup = String(recipientGroup || '').trim().toLowerCase();
+      const targetQuery = String(targetIdentity || targetEmail || '').trim();
+
+      const isExplicitTargeted = ['targeted', 'target', 'specific', 'single', 'individual', 'account'].includes(rawGroup);
+      const isExplicitAll = ['all users', 'all', 'all_users', 'broadcast', 'everyone'].includes(rawGroup);
+      const isTargeted = isExplicitTargeted || (Boolean(targetQuery) && !isExplicitAll);
+
+      if (isTargeted) {
+        if (!targetQuery) {
+          throw new Error('Target identity or account email is required when Recipient Group is Targeted');
+        }
+
+        const cleanTarget = targetQuery.toLowerCase();
+        const targetUser = await UserModel.findOne({
+          $or: [{ email: cleanTarget }, { userId: targetQuery }],
+        });
+
+        if (!targetUser) {
+          throw new Error(`Target account '${targetQuery}' not found in database`);
+        }
+
+        const notifId = `notif_${Math.floor(1000000 + Math.random() * 9000000)}`;
+        const newNotif = await NotificationModel.create({
+          notificationId: notifId,
+          userId: targetUser.userId,
+          title: cleanTitle,
+          message: cleanMessage,
+          type: cleanType,
+          priority: cleanPriority,
+          isRead: false,
+        });
+
+        return {
+          success: true,
+          message: `Notification delivered successfully to ${targetUser.email}`,
+          recipientGroup: 'Targeted',
+          recipientCount: 1,
+          priority: cleanPriority,
+          title: cleanTitle,
+          sampleNotification: {
+            id: newNotif.notificationId,
+            userId: newNotif.userId,
+            title: newNotif.title,
+            message: newNotif.message,
+            type: newNotif.type,
+            priority: newNotif.priority,
+            isRead: newNotif.isRead,
+            createdAt: newNotif.createdAt.toISOString(),
+          },
+        };
+      }
+
+      // Default: "All Users"
+      const allUsers = await UserModel.find({}, 'userId email name');
+      if (allUsers.length === 0) {
+        return {
+          success: true,
+          message: 'No registered accounts found to receive notification',
+          recipientGroup: 'All Users',
+          recipientCount: 0,
+          priority: cleanPriority,
+          title: cleanTitle,
+          sampleNotification: null,
+        };
+      }
+
+      const now = new Date();
+      const notificationDocs = allUsers.map((u) => ({
+        notificationId: `notif_${Math.floor(1000000 + Math.random() * 9000000)}`,
+        userId: u.userId,
+        title: cleanTitle,
+        message: cleanMessage,
+        type: cleanType,
+        priority: cleanPriority,
+        isRead: false,
+        createdAt: now,
+        updatedAt: now,
+      }));
+
+      await NotificationModel.insertMany(notificationDocs);
+
+      return {
+        success: true,
+        message: `Broadcast message sent to all ${allUsers.length} user account(s)`,
+        recipientGroup: 'All Users',
+        recipientCount: allUsers.length,
+        priority: cleanPriority,
+        title: cleanTitle,
+        sampleNotification: {
+          id: notificationDocs[0].notificationId,
+          userId: notificationDocs[0].userId,
+          title: cleanTitle,
+          message: cleanMessage,
+          type: cleanType,
+          priority: cleanPriority,
+          isRead: false,
+          createdAt: now.toISOString(),
+        },
+      };
     },
   },
 };

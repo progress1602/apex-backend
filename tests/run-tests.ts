@@ -394,8 +394,83 @@ async function runTestSuite() {
   assert(mongoSubAdmin !== null && mongoSubAdmin!.role === 'sub-admin', 'Sub-admin not in MongoDB');
   console.log(`✅ Security check passed: Investor blocked (403), Admin created sub-admin in MongoDB`);
 
-  // 13. Test GraphQL Engine (Apollo)
-  console.log('\n13. Testing Apollo GraphQL Engine backed by MongoDB...');
+  // 13. Test Admin Create Notice / Broadcast Message & Targeted Notification
+  console.log('\n13. Testing Admin Create Notice / Broadcast & Targeted Notifications...');
+  // 13.1 Non-admin attempt to create notification -> must fail with 403
+  const forbiddenNotif = await request({
+    method: 'POST',
+    path: '/api/v1/admin/notifications',
+    token: userToken, // Normal investor
+    body: {
+      title: 'Illegal Notice',
+      message: 'This should fail',
+      recipientGroup: 'All Users',
+    },
+  });
+  assert(forbiddenNotif.status === 403, `Expected 403 Forbidden on non-admin notice create, got ${forbiddenNotif.status}`);
+
+  // 13.2 Search and select account email endpoint
+  const searchRecipientsRes = await request({
+    method: 'GET',
+    path: `/api/v1/admin/notifications/recipients?q=${encodeURIComponent(testEmail)}`,
+    token: adminToken,
+  });
+  assert(searchRecipientsRes.status === 200, 'Search notification recipients failed');
+  assert(Array.isArray(searchRecipientsRes.data.recipients), 'Recipients is not array');
+  const foundRecipient = searchRecipientsRes.data.recipients.find((r: any) => r.email === testEmail);
+  assert(foundRecipient !== undefined, `Expected testEmail '${testEmail}' in recipient search`);
+  console.log(`✅ Admin search recipients verified: found account '${testEmail}'`);
+
+  // 13.3 Broadcast Notice to "All Users"
+  const broadcastRes = await request({
+    method: 'POST',
+    path: '/api/v1/admin/notifications',
+    token: adminToken,
+    body: {
+      recipientGroup: 'All Users',
+      priority: 'Standard Information',
+      title: 'Create Notice',
+      message: 'Global announcement: System upgrade complete.',
+    },
+  });
+  assert(broadcastRes.status === 201 && broadcastRes.data.success === true, 'Admin broadcast notice failed');
+  assert(broadcastRes.data.recipientGroup === 'All Users', 'Recipient group is All Users');
+  assert(broadcastRes.data.recipientCount >= 1, 'Recipient count should be >= 1');
+  console.log(`✅ Admin Broadcast Notice to 'All Users' verified (${broadcastRes.data.recipientCount} accounts reached)`);
+
+  // 13.4 Targeted Notice to specific account email
+  const targetedRes = await request({
+    method: 'POST',
+    path: '/api/v1/admin/notifications',
+    token: adminToken,
+    body: {
+      recipientGroup: 'Targeted',
+      targetIdentity: testEmail,
+      priority: 'Standard Information',
+      title: 'Broadcast Message',
+      message: 'Enter the notification content here...',
+    },
+  });
+  assert(targetedRes.status === 201 && targetedRes.data.success === true, 'Admin targeted notice failed');
+  assert(targetedRes.data.recipientGroup === 'Targeted', 'Recipient group should be Targeted');
+  assert(targetedRes.data.recipientCount === 1, 'Recipient count should be 1');
+  assert(targetedRes.data.targetAccount.email === testEmail, 'Target account email matches');
+  console.log(`✅ Admin Targeted Notice verified for account '${testEmail}'`);
+
+  // 13.5 Verify targeted user receives the notification with priority
+  const userCheckNotifs = await request({
+    method: 'GET',
+    path: '/api/v1/notifications',
+    token: userToken,
+  });
+  assert(userCheckNotifs.status === 200, 'User notifications fetch failed');
+  const receivedTargeted = userCheckNotifs.data.notifications.find((n: any) => n.message === 'Enter the notification content here...');
+  assert(receivedTargeted !== undefined, 'Targeted notification not found in user inbox');
+  assert(receivedTargeted.priority === 'Standard Information', 'Priority mismatch in received notification');
+  console.log(`✅ User inbox verified: notification received with Priority '${receivedTargeted.priority}'`);
+
+  // 14. Test GraphQL Engine (Apollo)
+  console.log('\n14. Testing Apollo GraphQL Engine backed by MongoDB...');
   const gqlMeRes = await request({
     method: 'POST',
     path: '/graphql',
@@ -506,10 +581,60 @@ async function runTestSuite() {
   });
   assert(gqlLoginRes.status === 200 && gqlLoginRes.data.data.login.success === true, 'GraphQL login failed');
   assert(gqlLoginRes.data.data.login.user.email === testEmail, 'GraphQL login user email mismatch');
-  console.log('✅ Apollo GraphQL queries, login & admin mutations executed directly against MongoDB Atlas');
 
-  // 14. Test Safe Data Migration & Idempotency
-  console.log('\n14. Testing Safe JSON to MongoDB Atlas Migration Logic...');
+  // Test GraphQL adminSearchNotificationRecipients
+  const gqlSearchRecipients = await request({
+    method: 'POST',
+    path: '/graphql',
+    token: adminToken,
+    body: {
+      query: `
+        query SearchRecipients {
+          adminSearchNotificationRecipients(query: "${testEmail}") {
+            id
+            name
+            email
+            role
+          }
+        }
+      `,
+    },
+  });
+  assert(gqlSearchRecipients.status === 200, 'GraphQL adminSearchNotificationRecipients failed');
+  assert(Array.isArray(gqlSearchRecipients.data.data.adminSearchNotificationRecipients), 'Search recipients is array');
+
+  // Test GraphQL adminCreateNotification (Targeted Notice)
+  const gqlCreateNotice = await request({
+    method: 'POST',
+    path: '/graphql',
+    token: adminToken,
+    body: {
+      query: `
+        mutation CreateNotice {
+          adminCreateNotification(
+            recipientGroup: "Targeted"
+            targetEmail: "${testEmail}"
+            priority: "Standard Information"
+            title: "GraphQL Notice"
+            message: "Targeted notice via Apollo GraphQL"
+          ) {
+            success
+            message
+            recipientGroup
+            recipientCount
+            priority
+            title
+          }
+        }
+      `,
+    },
+  });
+  assert(gqlCreateNotice.status === 200 && gqlCreateNotice.data.data.adminCreateNotification.success === true, 'GraphQL adminCreateNotification failed');
+  assert(gqlCreateNotice.data.data.adminCreateNotification.recipientCount === 1, 'GraphQL recipientCount should be 1');
+  console.log('✅ Apollo GraphQL queries, login, notice creation & admin mutations executed directly against MongoDB Atlas');
+
+  // 15. Test Safe Data Migration & Idempotency
+  console.log('\n15. Testing Safe JSON to MongoDB Atlas Migration Logic...');
   const DB_FILE = path.join(process.cwd(), 'data', 'db.json');
   if (fs.existsSync(DB_FILE)) {
     const raw = fs.readFileSync(DB_FILE, 'utf-8');

@@ -565,4 +565,237 @@ router.put('/plans/:id', async (req: Request, res: Response): Promise<void> => {
   }
 });
 
+// GET /api/v1/admin/notifications/recipients (Search and select an account email for targeted notice)
+router.get('/notifications/recipients', requireAdmin, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const q = String(req.query.q || req.query.query || '').trim();
+    let filter: any = {};
+    if (q) {
+      const regex = new RegExp(q, 'i');
+      filter = {
+        $or: [{ email: regex }, { name: regex }, { userId: regex }],
+      };
+    }
+
+    const users = await UserModel.find(filter)
+      .select('userId name email role tier balance')
+      .sort({ createdAt: -1 })
+      .limit(50);
+
+    res.status(200).json({
+      success: true,
+      total: users.length,
+      recipients: users.map((u) => ({
+        id: u.userId,
+        userId: u.userId,
+        name: u.name,
+        email: u.email,
+        role: u.role,
+        tier: u.tier,
+        balance: Number(u.balance.toFixed(2)),
+      })),
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message || 'Internal error searching recipients' });
+  }
+});
+
+// GET /api/v1/admin/notifications (Admin list all broadcast and user notifications)
+router.get('/notifications', requireAdmin, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const page = Math.max(1, parseInt(String(req.query.page || 1), 10));
+    const limit = Math.max(1, Math.min(100, parseInt(String(req.query.limit || 50), 10)));
+    const skip = (page - 1) * limit;
+
+    const [total, notifs] = await Promise.all([
+      NotificationModel.countDocuments(),
+      NotificationModel.find().sort({ createdAt: -1 }).skip(skip).limit(limit),
+    ]);
+
+    res.status(200).json({
+      success: true,
+      total,
+      page,
+      limit,
+      notifications: notifs.map((n) => ({
+        id: n.notificationId,
+        userId: n.userId,
+        title: n.title,
+        message: n.message,
+        type: n.type,
+        priority: n.priority || 'Standard Information',
+        isRead: n.isRead,
+        createdAt: n.createdAt.toISOString(),
+      })),
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message || 'Internal error fetching notifications' });
+  }
+});
+
+// Reusable handler for creating notice / broadcast messages (used by POST /api/v1/admin/notifications and POST /api/v1/notifications/create)
+export async function handleAdminCreateNotification(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const {
+      title,
+      noticeTitle,
+      subject,
+      message,
+      messageBody,
+      body,
+      content,
+      recipientGroup,
+      group,
+      target,
+      priority,
+      notificationPriority,
+      targetIdentity,
+      targetEmail,
+      email,
+      accountEmail,
+      userId,
+      type,
+    } = req.body;
+
+    const rawMessage = message || messageBody || body || content;
+    if (!rawMessage || typeof rawMessage !== 'string' || !rawMessage.trim()) {
+      res.status(400).json({
+        success: false,
+        message: 'Message Body is required. Please enter the notification content here...',
+      });
+      return;
+    }
+
+    const cleanMessage = String(rawMessage).trim();
+    const cleanTitle = String(title || noticeTitle || subject || 'Broadcast Message').trim();
+    const cleanPriority = String(priority || notificationPriority || 'Standard Information').trim();
+    const cleanType = String(type || 'broadcast').trim();
+
+    // Determine recipient group: "All Users" vs "Targeted"
+    const rawGroup = String(recipientGroup || group || target || '').trim().toLowerCase();
+    const targetQuery = String(targetIdentity || targetEmail || email || accountEmail || userId || '').trim();
+
+    const isExplicitTargeted = ['targeted', 'target', 'specific', 'single', 'individual', 'account'].includes(rawGroup);
+    const isExplicitAll = ['all users', 'all', 'all_users', 'broadcast', 'everyone'].includes(rawGroup);
+    const isTargeted = isExplicitTargeted || (Boolean(targetQuery) && !isExplicitAll);
+
+    if (isTargeted) {
+      if (!targetQuery) {
+        res.status(400).json({
+          success: false,
+          message: 'Target identity or account email is required when Recipient Group is Targeted.',
+        });
+        return;
+      }
+
+      const cleanTarget = targetQuery.toLowerCase();
+      const targetUser = await UserModel.findOne({
+        $or: [
+          { email: cleanTarget },
+          { userId: targetQuery },
+        ],
+      });
+
+      if (!targetUser) {
+        res.status(404).json({
+          success: false,
+          message: `Target account '${targetQuery}' not found in database.`,
+        });
+        return;
+      }
+
+      const notifId = `notif_${Math.floor(1000000 + Math.random() * 9000000)}`;
+      const newNotif = await NotificationModel.create({
+        notificationId: notifId,
+        userId: targetUser.userId,
+        title: cleanTitle,
+        message: cleanMessage,
+        type: cleanType,
+        priority: cleanPriority,
+        isRead: false,
+      });
+
+      res.status(201).json({
+        success: true,
+        message: `Notification delivered successfully to ${targetUser.email}`,
+        recipientGroup: 'Targeted',
+        recipientCount: 1,
+        priority: cleanPriority,
+        title: cleanTitle,
+        targetAccount: {
+          id: targetUser.userId,
+          name: targetUser.name,
+          email: targetUser.email,
+          role: targetUser.role,
+        },
+        notification: {
+          id: newNotif.notificationId,
+          userId: newNotif.userId,
+          title: newNotif.title,
+          message: newNotif.message,
+          type: newNotif.type,
+          priority: newNotif.priority,
+          isRead: newNotif.isRead,
+          createdAt: newNotif.createdAt.toISOString(),
+        },
+      });
+      return;
+    }
+
+    // Default: Recipient Group is "All Users"
+    const allUsers = await UserModel.find({}, 'userId email name');
+    if (allUsers.length === 0) {
+      res.status(200).json({
+        success: true,
+        message: 'No registered accounts found to receive notification.',
+        recipientGroup: 'All Users',
+        recipientCount: 0,
+        priority: cleanPriority,
+        title: cleanTitle,
+      });
+      return;
+    }
+
+    const now = new Date();
+    const notificationDocs = allUsers.map((u) => ({
+      notificationId: `notif_${Math.floor(1000000 + Math.random() * 9000000)}`,
+      userId: u.userId,
+      title: cleanTitle,
+      message: cleanMessage,
+      type: cleanType,
+      priority: cleanPriority,
+      isRead: false,
+      createdAt: now,
+      updatedAt: now,
+    }));
+
+    await NotificationModel.insertMany(notificationDocs);
+
+    res.status(201).json({
+      success: true,
+      message: `Broadcast message sent to all ${allUsers.length} user account(s)`,
+      recipientGroup: 'All Users',
+      recipientCount: allUsers.length,
+      priority: cleanPriority,
+      title: cleanTitle,
+      sampleNotification: {
+        id: notificationDocs[0].notificationId,
+        title: cleanTitle,
+        message: cleanMessage,
+        type: cleanType,
+        priority: cleanPriority,
+        createdAt: now.toISOString(),
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({
+      success: false,
+      message: err.message || 'Internal error creating notice',
+    });
+  }
+}
+
+// POST /api/v1/admin/notifications (Create Notice / Broadcast Message)
+router.post('/notifications', requireAdmin, handleAdminCreateNotification);
+
 export default router;

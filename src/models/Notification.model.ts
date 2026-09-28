@@ -6,6 +6,7 @@ export interface INotificationDocument extends Document {
   title: string;
   message: string;
   type: string;
+  priority?: string;
   isRead: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -18,6 +19,7 @@ const NotificationSchema = new Schema<INotificationDocument>(
     title: { type: String, required: true },
     message: { type: String, required: true },
     type: { type: String, default: 'system' },
+    priority: { type: String, default: 'Standard Information' },
     isRead: { type: Boolean, default: false },
   },
   { timestamps: true }

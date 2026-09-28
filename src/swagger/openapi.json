@@ -1152,6 +1152,114 @@
           }
         }
       }
+    },
+    "/api/v1/admin/notifications": {
+      "post": {
+        "summary": "Create Notice / Broadcast Message (All Users or Targeted)",
+        "description": "Send a notification to all users or specific accounts with customizable priority.",
+        "tags": ["9. Administrative & Back-Office Operations"],
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["message"],
+                "properties": {
+                  "recipientGroup": {
+                    "type": "string",
+                    "enum": ["All Users", "Targeted"],
+                    "default": "All Users",
+                    "example": "All Users"
+                  },
+                  "targetIdentity": {
+                    "type": "string",
+                    "description": "Search and select an account email (Required when Recipient Group is Targeted)",
+                    "example": "investor@apexbridge.com"
+                  },
+                  "priority": {
+                    "type": "string",
+                    "default": "Standard Information",
+                    "example": "Standard Information"
+                  },
+                  "title": {
+                    "type": "string",
+                    "default": "Broadcast Message",
+                    "example": "Create Notice"
+                  },
+                  "message": {
+                    "type": "string",
+                    "description": "Enter the notification content here...",
+                    "example": "Platform scheduled maintenance and new staking yields have been deployed."
+                  },
+                  "type": {
+                    "type": "string",
+                    "default": "broadcast",
+                    "example": "broadcast"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Notice created and delivered successfully"
+          },
+          "400": {
+            "description": "Bad Request: Missing message body or target identity"
+          },
+          "403": {
+            "description": "Forbidden: Admin access required"
+          },
+          "404": {
+            "description": "Not Found: Target account email not found"
+          }
+        }
+      },
+      "get": {
+        "summary": "Admin view all broadcast and system notifications",
+        "tags": ["9. Administrative & Back-Office Operations"],
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "List of notifications"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/notifications/recipients": {
+      "get": {
+        "summary": "Search and select an account email for targeted notice",
+        "tags": ["9. Administrative & Back-Office Operations"],
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Search term (email, name, or userId)",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching accounts list"
+          }
+        }
+      }
+    },
+    "/api/v1/notifications/create": {
+      "post": {
+        "summary": "Create Notice / Broadcast Message (Alias)",
+        "tags": ["8. Notifications & Alerts"],
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "201": {
+            "description": "Notice created and delivered successfully"
+          }
+        }
+      }
     }
   }
 }
