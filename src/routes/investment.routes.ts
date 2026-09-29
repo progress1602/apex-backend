@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth';
 import { UserModel, InvestmentModel, PlanModel, TransactionModel } from '../models';
 import { formatInvestmentResponse } from '../utils/investmentProgress';
+import { checkAndSettleMaturedInvestments, settleInvestmentById } from '../services/settlementService';
 
 const router = Router();
 
@@ -29,8 +30,10 @@ router.get('/plans', async (_req, res: Response): Promise<void> => {
 router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const user = req.user!;
-    const userInvs = await InvestmentModel.find({ userId: user.userId }).sort({ createdAt: -1 });
+    // Auto-settle any matured investments just-in-time
+    await checkAndSettleMaturedInvestments(user.userId);
 
+    const userInvs = await InvestmentModel.find({ userId: user.userId }).sort({ createdAt: -1 });
     const formatted = userInvs.map((inv) => formatInvestmentResponse(inv));
 
     res.status(200).json({ investments: formatted });
@@ -44,6 +47,10 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res: Response
   try {
     const user = req.user!;
     const id = req.params.id as string;
+
+    // Auto-settle any matured investments just-in-time
+    await checkAndSettleMaturedInvestments(user.userId);
+
     const inv = await InvestmentModel.findOne({ investmentId: id, userId: user.userId });
     if (!inv) {
       res.status(404).json({ success: false, message: 'Investment position not found' });
@@ -134,7 +141,10 @@ router.post('/:id/settle', authenticate, async (req: AuthenticatedRequest, res: 
     const user = req.user!;
     const id = req.params.id as string;
 
-    const inv = await InvestmentModel.findOne({ investmentId: id, userId: user.userId });
+    const inv = await InvestmentModel.findOne({
+      userId: user.userId,
+      $or: [{ investmentId: id }, ...(id.match(/^[0-9a-fA-F]{24}$/) ? [{ _id: id }] : [])],
+    });
     if (!inv) {
       res.status(404).json({ success: false, message: 'Investment position not found' });
       return;
@@ -145,41 +155,18 @@ router.post('/:id/settle', authenticate, async (req: AuthenticatedRequest, res: 
       return;
     }
 
-    const payoutAmount = inv.projectedReturn || Number((inv.amount * 1.15).toFixed(2));
-
-    // Update investment status in MongoDB
-    inv.status = 'settled';
-    inv.progress = 100;
-    await inv.save();
-
-    // Atomically credit user balance in MongoDB
-    const updatedUser = await UserModel.findOneAndUpdate(
-      { userId: user.userId },
-      { $inc: { balance: payoutAmount } },
-      { new: true }
-    );
-
-    const txId = `tx_settle_${Math.floor(10000 + Math.random() * 90000)}`;
-    const nowIso = new Date().toISOString();
-
-    // Persist settlement transaction to MongoDB
-    await TransactionModel.create({
-      transactionId: txId,
-      userId: user.userId,
-      type: 'investment',
-      amount: payoutAmount,
-      status: 'completed',
-      plan: `${inv.planName} Settlement`,
-      date: nowIso,
-    });
+    const settleRes = await settleInvestmentById(inv.investmentId);
+    if (!settleRes.settled) {
+      res.status(400).json({ success: false, message: settleRes.reason || 'Failed to settle investment' });
+      return;
+    }
 
     res.status(200).json({
       success: true,
       settlement: {
-        investmentId: inv.investmentId,
-        payoutAmount: Number(payoutAmount.toFixed(2)),
-        creditedBalance: Number(updatedUser?.balance.toFixed(2) || 0),
-        transactionId: txId,
+        investmentId: settleRes.investmentId,
+        payoutAmount: Number(settleRes.payoutAmount.toFixed(2)),
+        creditedBalance: Number(settleRes.newBalance || 0),
         status: 'completed',
       },
     });

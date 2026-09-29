@@ -143,20 +143,27 @@ router.post('/login', async (req: Request, res: Response): Promise<void> => {
   }
 });
 
+import { checkAndSettleMaturedInvestments } from '../services/settlementService';
+
 // GET /api/v1/auth/me
-router.get('/me', authenticate, (req: AuthenticatedRequest, res: Response): void => {
-  const user = req.user!;
-  res.status(200).json({
-    success: true,
-    user: {
-      id: user.userId,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      balance: user.balance,
-      tier: user.tier,
-    },
-  });
+router.get('/me', authenticate, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    await checkAndSettleMaturedInvestments(req.user!.userId);
+    const freshUser = (await UserModel.findOne({ userId: req.user!.userId })) || req.user!;
+    res.status(200).json({
+      success: true,
+      user: {
+        id: freshUser.userId,
+        name: freshUser.name,
+        email: freshUser.email,
+        role: freshUser.role,
+        balance: Number(freshUser.balance.toFixed(2)),
+        tier: freshUser.tier,
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message || 'Internal server error' });
+  }
 });
 
 export default router;

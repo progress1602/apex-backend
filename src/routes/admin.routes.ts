@@ -12,6 +12,7 @@ import {
   PlanModel,
 } from '../models';
 import { formatInvestmentResponse } from '../utils/investmentProgress';
+import { checkAndSettleMaturedInvestments } from '../services/settlementService';
 
 const router = Router();
 
@@ -528,6 +529,9 @@ router.patch('/withdrawals/:id/status', async (req: Request, res: Response): Pro
 // GET /api/v1/admin/investments (Admin list all user investments with progress, investor email, and statistics)
 router.get('/investments', requireAdmin, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
+    // Auto-settle all matured investments across platform
+    await checkAndSettleMaturedInvestments();
+
     const status = req.query.status as string;
     const page = Math.max(1, parseInt(String(req.query.page || 1), 10));
     const limit = Math.max(1, Math.min(100, parseInt(String(req.query.limit || 50), 10)));
@@ -622,6 +626,8 @@ router.get('/investments', requireAdmin, async (req: AuthenticatedRequest, res: 
 // GET /api/v1/admin/investments/:id (Admin get specific user investment position)
 router.get('/investments/:id', requireAdmin, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
+    await checkAndSettleMaturedInvestments();
+
     const id = req.params.id as string;
     const inv = mongoose.isValidObjectId(id)
       ? await InvestmentModel.findOne({ $or: [{ investmentId: id }, { _id: id }] })

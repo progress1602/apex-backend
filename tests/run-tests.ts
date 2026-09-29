@@ -6,6 +6,7 @@ import path from 'path';
 import mongoose from 'mongoose';
 import { initializeApp } from '../src/app';
 import { stopEmbeddedMongo } from '../src/config/database';
+import { stopAutoSettlementWorker } from '../src/services/settlementService';
 import { UserModel, DepositModel, InvestmentModel, WithdrawalModel, TransactionModel, NotificationModel } from '../src/models';
 
 let server: http.Server;
@@ -292,40 +293,72 @@ async function runTestSuite() {
   // Simulate time progression: 8 days elapsed (past maturity of a 7-day plan)
   const eightDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
   const oneDayAgo = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000);
+  const userBeforeAutoSettle = await UserModel.findOne({ userId: testUserId });
+  const preAutoSettleBal = userBeforeAutoSettle!.balance;
+
   await InvestmentModel.updateOne(
     { investmentId: inv2Id },
     { $set: { startDate: eightDaysAgo, maturityDate: oneDayAgo, progress: 0 } }
   );
 
+  // Calling GET /investments triggers Just-In-Time auto-settlement of matured investments
   const matureCheck = await request({
     method: 'GET',
     path: `/api/v1/investments/${inv2Id}`,
     token: userToken,
   });
   assert(matureCheck.data.investment.progress === 100, `Expected 100% on mature investment, got ${matureCheck.data.investment.progress}%`);
-  assert(matureCheck.data.investment.status === 'completed', `Expected completed status, got ${matureCheck.data.investment.status}`);
-  console.log(`✅ Mature investment verified: progress 100%, status auto-completed`);
+  assert(matureCheck.data.investment.status === 'settled', `Expected auto-settled status, got ${matureCheck.data.investment.status}`);
+
+  // Verify user balance was atomically credited with principal + yield return
+  const userAfterAutoSettle = await UserModel.findOne({ userId: testUserId });
+  const expectedPayout = matureCheck.data.investment.projectedReturn;
+  assert(
+    Math.abs(userAfterAutoSettle!.balance - (preAutoSettleBal + expectedPayout)) < 0.01,
+    `Expected balance to increase by $${expectedPayout} (from ${preAutoSettleBal} to ${preAutoSettleBal + expectedPayout}), got ${userAfterAutoSettle!.balance}`
+  );
+  console.log(`✅ Auto-settlement verified: investment matured, status settled, and $${expectedPayout} credited to balance (New: $${userAfterAutoSettle!.balance})`);
+
+  // Verify idempotency / double-credit prevention: second settlement attempt must be rejected and balance unchanged
+  const doubleSettleAttempt = await request({
+    method: 'POST',
+    path: `/api/v1/investments/${inv2Id}/settle`,
+    token: userToken,
+  });
+  assert(doubleSettleAttempt.status === 400, 'Duplicate settle attempt should return 400 Bad Request');
+  const userAfterDoubleSettle = await UserModel.findOne({ userId: testUserId });
+  assert(
+    userAfterDoubleSettle!.balance === userAfterAutoSettle!.balance,
+    'User balance must NOT be double-credited on duplicate settle attempt'
+  );
+  console.log(`✅ Concurrency & Idempotency verified: zero double-crediting on duplicate settle attempt`);
 
   // Test Admin manual progress adjustment on an active investment
-  const futureMaturity = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000);
-  await InvestmentModel.updateOne(
-    { investmentId: inv2Id },
-    { $set: { maturityDate: futureMaturity, status: 'active' } }
-  );
+  const inv3Res = await request({
+    method: 'POST',
+    path: '/api/v1/investments',
+    token: userToken,
+    body: {
+      planId: 'starter',
+      amount: 500,
+    },
+  });
+  assert(inv3Res.status === 201 && inv3Res.data.success === true, 'Third investment failed');
+  const inv3Id = inv3Res.data.investment.id;
 
   const adminProgRes = await request({
     method: 'PATCH',
-    path: `/api/v1/admin/investments/${inv2Id}/progress`,
+    path: `/api/v1/admin/investments/${inv3Id}/progress`,
     token: adminToken,
     body: { progress: 85.5 },
   });
   assert(adminProgRes.status === 200 && adminProgRes.data.investment.progress === 85.5, `Admin progress patch failed: ${JSON.stringify(adminProgRes.data)}`);
   console.log(`✅ Admin manual progress update verified: set to 85.5%`);
 
-  // Clean up inv2 by settling and restore baseline balance for subsequent tests
+  // Clean up inv3 by settling and restore baseline balance for subsequent tests
   await request({
     method: 'POST',
-    path: `/api/v1/investments/${inv2Id}/settle`,
+    path: `/api/v1/investments/${inv3Id}/settle`,
     token: userToken,
   });
   await UserModel.updateOne({ userId: testUserId }, { $set: { balance: 21750 } });
@@ -794,12 +827,14 @@ initializeApp().then((app) => {
   server = app.listen(PORT, async () => {
     try {
       await runTestSuite();
+      stopAutoSettlementWorker();
       server.close();
       await mongoose.disconnect();
       await stopEmbeddedMongo();
       process.exit(0);
     } catch (err) {
       console.error('❌ Test suite failed with error:', err);
+      stopAutoSettlementWorker();
       server.close();
       await mongoose.disconnect();
       await stopEmbeddedMongo();

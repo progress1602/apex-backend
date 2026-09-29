@@ -4,6 +4,7 @@ import http from 'http';
 import mongoose from 'mongoose';
 import { initializeApp } from '../src/app';
 import { stopEmbeddedMongo } from '../src/config/database';
+import { stopAutoSettlementWorker } from '../src/services/settlementService';
 import { UserModel, TransactionModel } from '../src/models';
 
 const PORT = 5097;
@@ -143,6 +144,7 @@ async function runRestartPersistenceTest() {
   console.log('========================================================================\n');
 
   await new Promise<void>((resolve) => server2.close(() => resolve()));
+  stopAutoSettlementWorker();
   await mongoose.disconnect();
   await stopEmbeddedMongo();
   process.exit(0);
@@ -150,6 +152,7 @@ async function runRestartPersistenceTest() {
 
 runRestartPersistenceTest().catch((err) => {
   console.error('❌ Restart persistence test failed:', err);
+  stopAutoSettlementWorker();
   mongoose.disconnect().finally(async () => {
     await stopEmbeddedMongo();
     process.exit(1);

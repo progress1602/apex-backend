@@ -17,6 +17,7 @@ import {
   generateChartData,
 } from '../config/platform';
 import { formatInvestmentResponse } from '../utils/investmentProgress';
+import { checkAndSettleMaturedInvestments, settleInvestmentById } from '../services/settlementService';
 
 export const resolvers = {
   User: {
@@ -40,18 +41,21 @@ export const resolvers = {
   Query: {
     me: async (_: any, __: any, context: { user?: IUserDocument }) => {
       if (!context.user) throw new Error('Unauthorized: Missing or invalid token');
+      await checkAndSettleMaturedInvestments(context.user.userId);
       const freshUser = await UserModel.findOne({ userId: context.user.userId });
       if (!freshUser) throw new Error('Unauthorized: User not found in database');
       return freshUser;
     },
     userProfile: async (_: any, __: any, context: { user?: IUserDocument }) => {
       if (!context.user) throw new Error('Unauthorized: Missing or invalid token');
+      await checkAndSettleMaturedInvestments(context.user.userId);
       const freshUser = await UserModel.findOne({ userId: context.user.userId });
       if (!freshUser) throw new Error('Unauthorized: User not found in database');
       return freshUser;
     },
     walletSummary: async (_: any, __: any, context: { user?: IUserDocument }) => {
       if (!context.user) throw new Error('Unauthorized: Missing or invalid token');
+      await checkAndSettleMaturedInvestments(context.user.userId);
       const user = await UserModel.findOne({ userId: context.user.userId });
       if (!user) throw new Error('Unauthorized: User not found in database');
 
@@ -105,6 +109,7 @@ export const resolvers = {
     },
     userInvestments: async (_: any, __: any, context: { user?: IUserDocument }) => {
       if (!context.user) throw new Error('Unauthorized: Missing or invalid token');
+      await checkAndSettleMaturedInvestments(context.user.userId);
       const invs = await InvestmentModel.find({ userId: context.user.userId }).sort({ createdAt: -1 });
       return invs.map((inv) => formatInvestmentResponse(inv));
     },
@@ -307,6 +312,8 @@ export const resolvers = {
         throw new Error('Forbidden: Admin access required');
       }
 
+      await checkAndSettleMaturedInvestments();
+
       const p = Math.max(1, page || 1);
       const l = Math.max(1, Math.min(100, limit || 50));
       const skip = (p - 1) * l;
@@ -345,6 +352,8 @@ export const resolvers = {
       if (!context.user || (context.user.role !== 'admin' && context.user.role !== 'sub-admin')) {
         throw new Error('Forbidden: Admin access required');
       }
+
+      await checkAndSettleMaturedInvestments();
 
       const inv = mongoose.isValidObjectId(id)
         ? await InvestmentModel.findOne({ $or: [{ investmentId: id }, { _id: id }] })
@@ -589,39 +598,23 @@ export const resolvers = {
     settleInvestment: async (_: any, { id }: { id: string }, context: { user?: IUserDocument }) => {
       if (!context.user) throw new Error('Unauthorized: Missing or invalid token');
       const user = context.user;
-      const inv = await InvestmentModel.findOne({ investmentId: id, userId: user.userId });
+      const inv = await InvestmentModel.findOne({
+        userId: user.userId,
+        $or: [{ investmentId: id }, ...(mongoose.isValidObjectId(id) ? [{ _id: id }] : [])],
+      });
       if (!inv) throw new Error('Investment position not found');
       if (inv.status === 'settled') throw new Error('Investment is already settled');
 
-      const payoutAmount = inv.projectedReturn || Number((inv.amount * 1.15).toFixed(2));
-      inv.status = 'settled';
-      inv.progress = 100;
-      await inv.save();
-
-      const updatedUser = await UserModel.findOneAndUpdate(
-        { userId: user.userId },
-        { $inc: { balance: payoutAmount } },
-        { new: true }
-      );
-
-      const txId = `tx_settle_${Math.floor(10000 + Math.random() * 90000)}`;
-      const nowIso = new Date().toISOString();
-
-      await TransactionModel.create({
-        transactionId: txId,
-        userId: user.userId,
-        type: 'investment',
-        amount: payoutAmount,
-        status: 'completed',
-        plan: `${inv.planName} Settlement`,
-        date: nowIso,
-      });
+      const settleRes = await settleInvestmentById(inv.investmentId);
+      if (!settleRes.settled) {
+        throw new Error(settleRes.reason || 'Failed to settle investment');
+      }
 
       return {
-        investmentId: inv.investmentId,
-        payoutAmount: Number(payoutAmount.toFixed(2)),
-        creditedBalance: Number(updatedUser?.balance.toFixed(2) || 0),
-        transactionId: txId,
+        investmentId: settleRes.investmentId,
+        payoutAmount: Number(settleRes.payoutAmount.toFixed(2)),
+        creditedBalance: Number(settleRes.newBalance || 0),
+        transactionId: `tx_settle_${settleRes.investmentId}`,
         status: 'completed',
       };
     },

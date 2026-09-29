@@ -135,10 +135,13 @@ app.use('/api/v1/transactions', transactionRoutes);
 app.use('/api/v1/notifications', notificationRoutes);
 app.use('/api/v1/admin', adminRoutes);
 
+import { startAutoSettlementWorker } from './services/settlementService';
+
 // Setup database & Apollo Server on app
 export async function initializeApp() {
   try {
     await connectDatabase();
+    startAutoSettlementWorker(30000);
   } catch (error) {
     console.error('Error initializing database:', error);
     throw error;
