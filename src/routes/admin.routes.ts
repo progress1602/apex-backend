@@ -525,6 +525,131 @@ router.patch('/withdrawals/:id/status', async (req: Request, res: Response): Pro
   }
 });
 
+// GET /api/v1/admin/investments (Admin list all user investments with progress, investor email, and statistics)
+router.get('/investments', requireAdmin, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const status = req.query.status as string;
+    const page = Math.max(1, parseInt(String(req.query.page || 1), 10));
+    const limit = Math.max(1, Math.min(100, parseInt(String(req.query.limit || 50), 10)));
+    const skip = (page - 1) * limit;
+
+    const filter: any = {};
+    if (status && ['active', 'completed', 'settled'].includes(status)) {
+      filter.status = status;
+    }
+
+    const [total, allInvestments, allUsers] = await Promise.all([
+      InvestmentModel.countDocuments(filter),
+      InvestmentModel.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit),
+      UserModel.find({}, 'userId name email tier'),
+    ]);
+
+    const userMap = new Map<string, { name: string; email: string; tier: string }>();
+    for (const u of allUsers) {
+      userMap.set(u.userId, { name: u.name, email: u.email, tier: u.tier });
+    }
+
+    const formatted = allInvestments.map((inv) => {
+      const base = formatInvestmentResponse(inv);
+      const userInfo = userMap.get(inv.userId) || { name: 'Investor', email: '', tier: 'Standard' };
+      return {
+        ...base,
+        userId: inv.userId,
+        userName: userInfo.name,
+        userEmail: userInfo.email,
+        userTier: userInfo.tier,
+      };
+    });
+
+    // Calculate platform statistics
+    const statsAgg = await InvestmentModel.aggregate([
+      {
+        $group: {
+          _id: null,
+          totalVolume: { $sum: '$amount' },
+          activeVolume: {
+            $sum: {
+              $cond: [{ $eq: ['$status', 'active'] }, '$amount', 0],
+            },
+          },
+          activeCount: {
+            $sum: {
+              $cond: [{ $eq: ['$status', 'active'] }, 1, 0],
+            },
+          },
+          completedCount: {
+            $sum: {
+              $cond: [{ $eq: ['$status', 'completed'] }, 1, 0],
+            },
+          },
+          settledCount: {
+            $sum: {
+              $cond: [{ $eq: ['$status', 'settled'] }, 1, 0],
+            },
+          },
+        },
+      },
+    ]);
+
+    const stats = statsAgg[0] || {
+      totalVolume: 0,
+      activeVolume: 0,
+      activeCount: 0,
+      completedCount: 0,
+      settledCount: 0,
+    };
+
+    res.status(200).json({
+      success: true,
+      total,
+      page,
+      limit,
+      stats: {
+        totalInvestments: total,
+        totalVolume: Number((stats.totalVolume || 0).toFixed(2)),
+        activeVolume: Number((stats.activeVolume || 0).toFixed(2)),
+        activeCount: stats.activeCount || 0,
+        completedCount: stats.completedCount || 0,
+        settledCount: stats.settledCount || 0,
+      },
+      investments: formatted,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message || 'Internal error fetching admin investments' });
+  }
+});
+
+// GET /api/v1/admin/investments/:id (Admin get specific user investment position)
+router.get('/investments/:id', requireAdmin, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const id = req.params.id as string;
+    const inv = mongoose.isValidObjectId(id)
+      ? await InvestmentModel.findOne({ $or: [{ investmentId: id }, { _id: id }] })
+      : await InvestmentModel.findOne({ investmentId: id });
+
+    if (!inv) {
+      res.status(404).json({ success: false, message: 'Investment position not found' });
+      return;
+    }
+
+    const user = await UserModel.findOne({ userId: inv.userId }, 'userId name email tier balance');
+    const formatted = formatInvestmentResponse(inv);
+
+    res.status(200).json({
+      success: true,
+      investment: {
+        ...formatted,
+        userId: inv.userId,
+        userName: user?.name || 'Investor',
+        userEmail: user?.email || '',
+        userTier: user?.tier || 'Standard',
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message || 'Internal error fetching investment' });
+  }
+});
+
 // PUT /api/v1/admin/plans/:id
 router.put('/plans/:id', async (req: Request, res: Response): Promise<void> => {
   try {

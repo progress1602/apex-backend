@@ -1260,6 +1260,96 @@
           }
         }
       }
+    },
+    "/api/v1/admin/investments": {
+      "get": {
+        "summary": "Admin view all user investments across platform",
+        "description": "Returns all investments created by users, enriched with investor name, email, dynamic progress, and overall statistics.",
+        "tags": ["9. Administrative & Back-Office Operations"],
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Filter by investment status (active, completed, settled)",
+            "schema": { "type": "string", "enum": ["active", "completed", "settled"] }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": { "type": "integer", "default": 1 }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": { "type": "integer", "default": 50 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of user investments with statistics"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/investments/{id}": {
+      "get": {
+        "summary": "Admin view specific user investment position",
+        "tags": ["9. Administrative & Back-Office Operations"],
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Investment ID",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Detailed investment position"
+          },
+          "404": {
+            "description": "Investment position not found"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/investments/{id}/progress": {
+      "patch": {
+        "summary": "Admin override/adjust user investment progress and status",
+        "tags": ["9. Administrative & Back-Office Operations"],
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Investment ID",
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "progress": { "type": "number", "example": 85.5 },
+                  "status": { "type": "string", "enum": ["active", "completed", "settled"], "example": "active" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Investment progress updated successfully"
+          }
+        }
+      }
     }
   }
 }

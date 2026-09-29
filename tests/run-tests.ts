@@ -330,6 +330,41 @@ async function runTestSuite() {
   });
   await UserModel.updateOne({ userId: testUserId }, { $set: { balance: 21750 } });
 
+  // 7.2 Test Admin View All User Investments
+  console.log('\n7.2 Testing Admin View All User Investments Endpoint...');
+  // Security check: non-admin blocked
+  const nonAdminInvs = await request({
+    method: 'GET',
+    path: '/api/v1/admin/investments',
+    token: userToken,
+  });
+  assert(nonAdminInvs.status === 403, 'Non-admin should be forbidden from admin investments');
+
+  // Admin get all investments
+  const adminInvsRes = await request({
+    method: 'GET',
+    path: '/api/v1/admin/investments',
+    token: adminToken,
+  });
+  assert(adminInvsRes.status === 200 && adminInvsRes.data.success === true, 'Admin investments fetch failed');
+  assert(Array.isArray(adminInvsRes.data.investments), 'Investments is an array');
+  assert(adminInvsRes.data.total >= 1, 'Total investments should be >= 1');
+  assert(adminInvsRes.data.stats !== undefined, 'Platform investment stats included');
+  const foundUserInv = adminInvsRes.data.investments.find((i: any) => i.id === invId || i.id === inv2Id);
+  assert(foundUserInv !== undefined, 'User investment found in admin listing');
+  assert(foundUserInv.userEmail !== undefined, 'Investor email included in admin view');
+  console.log(`✅ Admin view all investments verified: total ${adminInvsRes.data.total}, volume $${adminInvsRes.data.stats.totalVolume}`);
+
+  // Admin get single investment
+  const adminSingleInvRes = await request({
+    method: 'GET',
+    path: `/api/v1/admin/investments/${invId}`,
+    token: adminToken,
+  });
+  assert(adminSingleInvRes.status === 200 && adminSingleInvRes.data.success === true, 'Admin single investment fetch failed');
+  assert(adminSingleInvRes.data.investment.userEmail === testEmail, 'User email matches on single investment');
+  console.log(`✅ Admin view single investment verified for ${adminSingleInvRes.data.investment.planName}`);
+
   // 8. Test Withdrawal Request
   console.log('\n8. Testing Withdrawal Creation...');
   const wdrRes = await request({

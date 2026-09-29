@@ -86,6 +86,10 @@ export const typeDefs = `#graphql
 
   type UserInvestment {
     id: ID
+    userId: String
+    userName: String
+    userEmail: String
+    planId: String
     planName: String
     amount: Float
     roi: String
@@ -191,6 +195,8 @@ export const typeDefs = `#graphql
     adminWithdrawals: [WithdrawalResult]
     adminSearchNotificationRecipients(query: String): [NotificationRecipientOption]
     adminNotifications(page: Int, limit: Int): [NotificationItem]
+    adminInvestments(status: String, page: Int, limit: Int): [UserInvestment]
+    adminInvestment(id: ID!): UserInvestment
   }
 
   type Mutation {
@@ -218,5 +224,6 @@ export const typeDefs = `#graphql
       message: String!
       type: String
     ): AdminCreateNotificationResult
+    adminUpdateInvestmentProgress(investmentId: ID!, progress: Float!, status: String): UserInvestment
   }
 `;

@@ -298,6 +298,70 @@ export const resolvers = {
         createdAt: n.createdAt.toISOString(),
       }));
     },
+    adminInvestments: async (
+      _: any,
+      { status, page, limit }: { status?: string; page?: number; limit?: number },
+      context: { user?: IUserDocument }
+    ) => {
+      if (!context.user || (context.user.role !== 'admin' && context.user.role !== 'sub-admin')) {
+        throw new Error('Forbidden: Admin access required');
+      }
+
+      const p = Math.max(1, page || 1);
+      const l = Math.max(1, Math.min(100, limit || 50));
+      const skip = (p - 1) * l;
+
+      const filter: any = {};
+      if (status && ['active', 'completed', 'settled'].includes(status)) {
+        filter.status = status;
+      }
+
+      const [invs, users] = await Promise.all([
+        InvestmentModel.find(filter).sort({ createdAt: -1 }).skip(skip).limit(l),
+        UserModel.find({}, 'userId name email'),
+      ]);
+
+      const userMap = new Map<string, { name: string; email: string }>();
+      for (const u of users) {
+        userMap.set(u.userId, { name: u.name, email: u.email });
+      }
+
+      return invs.map((inv) => {
+        const formatted = formatInvestmentResponse(inv);
+        const userInfo = userMap.get(inv.userId) || { name: 'Investor', email: '' };
+        return {
+          ...formatted,
+          userId: inv.userId,
+          userName: userInfo.name,
+          userEmail: userInfo.email,
+        };
+      });
+    },
+    adminInvestment: async (
+      _: any,
+      { id }: { id: string },
+      context: { user?: IUserDocument }
+    ) => {
+      if (!context.user || (context.user.role !== 'admin' && context.user.role !== 'sub-admin')) {
+        throw new Error('Forbidden: Admin access required');
+      }
+
+      const inv = mongoose.isValidObjectId(id)
+        ? await InvestmentModel.findOne({ $or: [{ investmentId: id }, { _id: id }] })
+        : await InvestmentModel.findOne({ investmentId: id });
+
+      if (!inv) throw new Error('Investment position not found');
+
+      const user = await UserModel.findOne({ userId: inv.userId }, 'userId name email');
+      const formatted = formatInvestmentResponse(inv);
+
+      return {
+        ...formatted,
+        userId: inv.userId,
+        userName: user?.name || 'Investor',
+        userEmail: user?.email || '',
+      };
+    },
   },
 
   Mutation: {
@@ -997,6 +1061,49 @@ export const resolvers = {
           isRead: false,
           createdAt: now.toISOString(),
         },
+      };
+    },
+
+    adminUpdateInvestmentProgress: async (
+      _: any,
+      { investmentId, progress, status }: { investmentId: string; progress: number; status?: string },
+      context: { user?: IUserDocument }
+    ) => {
+      if (!context.user || (context.user.role !== 'admin' && context.user.role !== 'sub-admin')) {
+        throw new Error('Forbidden: Admin access required');
+      }
+
+      const inv = mongoose.isValidObjectId(investmentId)
+        ? await InvestmentModel.findOne({ $or: [{ investmentId }, { _id: investmentId }] })
+        : await InvestmentModel.findOne({ investmentId });
+
+      if (!inv) throw new Error('Investment position not found');
+
+      if (progress !== undefined) {
+        const numProg = Math.max(0, Math.min(100, Number(progress)));
+        inv.progress = numProg;
+        if (numProg >= 100 && inv.status === 'active') {
+          inv.status = 'completed';
+        }
+      }
+
+      if (status !== undefined && ['active', 'completed', 'settled'].includes(status)) {
+        inv.status = status;
+        if (status === 'settled' || status === 'completed') {
+          inv.progress = 100;
+        }
+      }
+
+      await inv.save();
+
+      const user = await UserModel.findOne({ userId: inv.userId }, 'userId name email');
+      const formatted = formatInvestmentResponse(inv);
+
+      return {
+        ...formatted,
+        userId: inv.userId,
+        userName: user?.name || 'Investor',
+        userEmail: user?.email || '',
       };
     },
   },
