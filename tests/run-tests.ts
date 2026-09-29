@@ -249,6 +249,87 @@ async function runTestSuite() {
   assert(userAfterSettle!.balance === 21750, `Expected balance 21750 after settlement, got ${userAfterSettle!.balance}`);
   console.log(`✅ Investment created and settled. New user balance: $${userAfterSettle!.balance}`);
 
+  // Test Dynamic Time-based Investment Progress (Liquidity Growth Matrix)
+  console.log('\n7.1 Testing Dynamic Progress Calculation with Time Progression...');
+  const inv2Res = await request({
+    method: 'POST',
+    path: '/api/v1/investments',
+    token: userToken,
+    body: {
+      planId: 'starter',
+      amount: 1000,
+    },
+  });
+  assert(inv2Res.status === 201 && inv2Res.data.success === true, 'Second investment failed');
+  const inv2Id = inv2Res.data.investment.id;
+
+  // Initial progress should be >= 0
+  const initialInvCheck = await request({
+    method: 'GET',
+    path: `/api/v1/investments/${inv2Id}`,
+    token: userToken,
+  });
+  assert(initialInvCheck.status === 200, 'Failed to fetch single investment');
+  assert(typeof initialInvCheck.data.investment.progress === 'number', 'Progress is a number');
+
+  // Simulate time progression: 3.5 days elapsed out of 7 days (halfway through plan)
+  const threePointFiveDaysAgo = new Date(Date.now() - 3.5 * 24 * 60 * 60 * 1000);
+  await InvestmentModel.updateOne(
+    { investmentId: inv2Id },
+    { $set: { startDate: threePointFiveDaysAgo } }
+  );
+
+  const halfwayCheck = await request({
+    method: 'GET',
+    path: '/api/v1/investments',
+    token: userToken,
+  });
+  const halfwayInv = halfwayCheck.data.investments.find((i: any) => i.id === inv2Id);
+  assert(halfwayInv !== undefined, 'Investment not found in list');
+  assert(halfwayInv.progress >= 50, `Expected progress >= 50% after 3.5 days, got ${halfwayInv.progress}%`);
+  console.log(`✅ Time progression verified: halfway elapsed gives ${halfwayInv.progress}% progress`);
+
+  // Simulate time progression: 8 days elapsed (past maturity of a 7-day plan)
+  const eightDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
+  const oneDayAgo = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000);
+  await InvestmentModel.updateOne(
+    { investmentId: inv2Id },
+    { $set: { startDate: eightDaysAgo, maturityDate: oneDayAgo, progress: 0 } }
+  );
+
+  const matureCheck = await request({
+    method: 'GET',
+    path: `/api/v1/investments/${inv2Id}`,
+    token: userToken,
+  });
+  assert(matureCheck.data.investment.progress === 100, `Expected 100% on mature investment, got ${matureCheck.data.investment.progress}%`);
+  assert(matureCheck.data.investment.status === 'completed', `Expected completed status, got ${matureCheck.data.investment.status}`);
+  console.log(`✅ Mature investment verified: progress 100%, status auto-completed`);
+
+  // Test Admin manual progress adjustment on an active investment
+  const futureMaturity = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000);
+  await InvestmentModel.updateOne(
+    { investmentId: inv2Id },
+    { $set: { maturityDate: futureMaturity, status: 'active' } }
+  );
+
+  const adminProgRes = await request({
+    method: 'PATCH',
+    path: `/api/v1/admin/investments/${inv2Id}/progress`,
+    token: adminToken,
+    body: { progress: 85.5 },
+  });
+  assert(adminProgRes.status === 200 && adminProgRes.data.investment.progress === 85.5, `Admin progress patch failed: ${JSON.stringify(adminProgRes.data)}`);
+  console.log(`✅ Admin manual progress update verified: set to 85.5%`);
+
+  // Clean up inv2 by settling and restore baseline balance for subsequent tests
+  await request({
+    method: 'POST',
+    path: `/api/v1/investments/${inv2Id}/settle`,
+    token: userToken,
+  });
+  await UserModel.updateOne({ userId: testUserId }, { $set: { balance: 21750 } });
+
   // 8. Test Withdrawal Request
   console.log('\n8. Testing Withdrawal Creation...');
   const wdrRes = await request({

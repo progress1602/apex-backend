@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 import { requireAdmin, AuthenticatedRequest } from '../middleware/auth';
 import {
@@ -10,6 +11,7 @@ import {
   NotificationModel,
   PlanModel,
 } from '../models';
+import { formatInvestmentResponse } from '../utils/investmentProgress';
 
 const router = Router();
 
@@ -98,7 +100,7 @@ router.get('/users/:identifier', requireAdmin, async (req: AuthenticatedRequest,
       records: {
         deposits,
         withdrawals,
-        investments,
+        investments: investments.map((inv) => formatInvestmentResponse(inv)),
         transactions,
       },
     });
@@ -562,6 +564,48 @@ router.put('/plans/:id', async (req: Request, res: Response): Promise<void> => {
     });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message || 'Internal error updating plan' });
+  }
+});
+
+// PATCH /api/v1/admin/investments/:id/progress (Admin-only: override or update investment progress and status)
+router.patch('/investments/:id/progress', requireAdmin, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const id = req.params.id as string;
+    const { progress, status } = req.body;
+
+    const inv = mongoose.isValidObjectId(id)
+      ? await InvestmentModel.findOne({ $or: [{ investmentId: id }, { _id: id }] })
+      : await InvestmentModel.findOne({ investmentId: id });
+
+    if (!inv) {
+      res.status(404).json({ success: false, message: 'Investment position not found' });
+      return;
+    }
+
+    if (progress !== undefined) {
+      const numProg = Math.max(0, Math.min(100, Number(progress)));
+      inv.progress = numProg;
+      if (numProg >= 100 && inv.status === 'active') {
+        inv.status = 'completed';
+      }
+    }
+
+    if (status !== undefined && ['active', 'completed', 'settled'].includes(status)) {
+      inv.status = status;
+      if (status === 'settled' || status === 'completed') {
+        inv.progress = 100;
+      }
+    }
+
+    await inv.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Investment progress updated successfully in MongoDB',
+      investment: formatInvestmentResponse(inv),
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message || 'Internal error updating investment progress' });
   }
 });
 

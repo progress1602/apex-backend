@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth';
 import { UserModel, InvestmentModel, PlanModel, TransactionModel } from '../models';
+import { formatInvestmentResponse } from '../utils/investmentProgress';
 
 const router = Router();
 
@@ -30,21 +31,27 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response): 
     const user = req.user!;
     const userInvs = await InvestmentModel.find({ userId: user.userId }).sort({ createdAt: -1 });
 
-    const formatted = userInvs.map((inv) => ({
-      id: inv.investmentId,
-      planName: inv.planName,
-      amount: inv.amount,
-      roi: inv.roi,
-      progress: inv.progress,
-      projectedReturn: inv.projectedReturn,
-      status: inv.status,
-      startDate: inv.startDate.toISOString(),
-      maturityDate: inv.maturityDate.toISOString(),
-    }));
+    const formatted = userInvs.map((inv) => formatInvestmentResponse(inv));
 
     res.status(200).json({ investments: formatted });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message || 'Internal error fetching investments' });
+  }
+});
+
+// GET /api/v1/investments/:id (Get single investment with dynamic time-based progress)
+router.get('/:id', authenticate, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const user = req.user!;
+    const id = req.params.id as string;
+    const inv = await InvestmentModel.findOne({ investmentId: id, userId: user.userId });
+    if (!inv) {
+      res.status(404).json({ success: false, message: 'Investment position not found' });
+      return;
+    }
+    res.status(200).json({ success: true, investment: formatInvestmentResponse(inv) });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message || 'Internal error fetching investment' });
   }
 });
 
@@ -113,14 +120,7 @@ router.post('/', authenticate, async (req: AuthenticatedRequest, res: Response):
 
     res.status(201).json({
       success: true,
-      investment: {
-        id: newInvestment.investmentId,
-        planName: newInvestment.planName,
-        amount: newInvestment.amount,
-        roi: newInvestment.roi,
-        status: newInvestment.status,
-        startDate: newInvestment.startDate.toISOString(),
-      },
+      investment: formatInvestmentResponse(newInvestment),
       newAvailableBalance: Number(updatedUser.balance.toFixed(2)),
     });
   } catch (err: any) {

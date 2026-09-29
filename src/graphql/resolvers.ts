@@ -16,6 +16,7 @@ import {
   PLATFORM_MARKET_TICKERS,
   generateChartData,
 } from '../config/platform';
+import { formatInvestmentResponse } from '../utils/investmentProgress';
 
 export const resolvers = {
   User: {
@@ -105,17 +106,7 @@ export const resolvers = {
     userInvestments: async (_: any, __: any, context: { user?: IUserDocument }) => {
       if (!context.user) throw new Error('Unauthorized: Missing or invalid token');
       const invs = await InvestmentModel.find({ userId: context.user.userId }).sort({ createdAt: -1 });
-      return invs.map((inv) => ({
-        id: inv.investmentId,
-        planName: inv.planName,
-        amount: inv.amount,
-        roi: inv.roi,
-        progress: inv.progress,
-        projectedReturn: inv.projectedReturn,
-        status: inv.status,
-        startDate: inv.startDate.toISOString(),
-        maturityDate: inv.maturityDate.toISOString(),
-      }));
+      return invs.map((inv) => formatInvestmentResponse(inv));
     },
     transactions: async (
       _: any,
@@ -528,17 +519,7 @@ export const resolvers = {
         date: startDate.toISOString(),
       });
 
-      return {
-        id: newInvestment.investmentId,
-        planName: newInvestment.planName,
-        amount: newInvestment.amount,
-        roi: newInvestment.roi,
-        progress: newInvestment.progress,
-        projectedReturn: newInvestment.projectedReturn,
-        status: newInvestment.status,
-        startDate: newInvestment.startDate.toISOString(),
-        maturityDate: newInvestment.maturityDate.toISOString(),
-      };
+      return formatInvestmentResponse(newInvestment);
     },
 
     settleInvestment: async (_: any, { id }: { id: string }, context: { user?: IUserDocument }) => {
