@@ -75,8 +75,13 @@ let embeddedMongod: any = null;
 
 async function startEmbeddedMongo() {
   if (!embeddedMongod) {
+    process.env.MONGOMS_MD5_CHECK = '0';
     const { MongoMemoryServer } = await import('mongodb-memory-server');
-    embeddedMongod = await MongoMemoryServer.create();
+    embeddedMongod = await MongoMemoryServer.create({
+      binary: {
+        checkMD5: false,
+      },
+    });
   }
   const uri = embeddedMongod.getUri();
   await mongoose.connect(uri);

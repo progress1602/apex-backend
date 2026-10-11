@@ -7,6 +7,12 @@ export interface User {
   tier: string;
   avatar?: string;
   balance: number;
+  totalDeposit?: number;
+  totalDeposits?: number;
+  totalProfits?: number;
+  totalProfit?: number;
+  totalBalance?: number;
+  totalAmount?: number;
   phone?: string;
   is2FAEnabled: boolean;
   currencyPreference: string;
@@ -24,6 +30,12 @@ export interface WalletSummary {
   availableBalance: number;
   activeInvestments: number;
   totalEarnings: number;
+  totalDeposit: number;
+  totalDeposits: number;
+  totalProfits: number;
+  totalProfit: number;
+  totalBalance: number;
+  totalAmount: number;
   growth24h: number;
   currency: string;
 }

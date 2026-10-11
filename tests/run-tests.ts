@@ -1,4 +1,9 @@
 process.env.NODE_ENV = 'test';
+process.env.MONGOMS_MD5_CHECK = '0';
+process.env.MONGOMS_DISABLE_POSTINSTALL = '1';
+
+import dotenv from 'dotenv';
+dotenv.config();
 
 import http from 'http';
 import fs from 'fs';
@@ -249,6 +254,42 @@ async function runTestSuite() {
   const userAfterSettle = await UserModel.findOne({ userId: testUserId });
   assert(userAfterSettle!.balance === 21750, `Expected balance 21750 after settlement, got ${userAfterSettle!.balance}`);
   console.log(`✅ Investment created and settled. New user balance: $${userAfterSettle!.balance}`);
+
+  // 7.0 Test Total Deposit, Total Profits, and Total Balance
+  console.log('\n7.0 Testing Financial Metrics (totalDeposit, totalProfits, totalBalance)...');
+  const profileRes = await request({
+    method: 'GET',
+    path: '/api/v1/user/profile',
+    token: userToken,
+  });
+  assert(profileRes.status === 200, 'GET /user/profile failed');
+  assert(profileRes.data.totalDeposit === 20000, `Expected totalDeposit 20000, got ${profileRes.data.totalDeposit}`);
+  assert(profileRes.data.totalProfits === 1750, `Expected totalProfits 1750, got ${profileRes.data.totalProfits}`);
+  assert(profileRes.data.totalBalance === 21750, `Expected totalBalance 21750, got ${profileRes.data.totalBalance}`);
+  assert(profileRes.data.totalBalance === profileRes.data.totalDeposit + profileRes.data.totalProfits, 'totalBalance must equal totalDeposit + totalProfits');
+  console.log(`✅ User profile metrics verified: totalDeposit=$${profileRes.data.totalDeposit}, totalProfits=$${profileRes.data.totalProfits}, totalBalance=$${profileRes.data.totalBalance}`);
+
+  const walletRes = await request({
+    method: 'GET',
+    path: '/api/v1/wallet/summary',
+    token: userToken,
+  });
+  assert(walletRes.status === 200, 'GET /wallet/summary failed');
+  assert(walletRes.data.data.totalDeposit === 20000, `Wallet expected totalDeposit 20000, got ${walletRes.data.data.totalDeposit}`);
+  assert(walletRes.data.data.totalProfits === 1750, `Wallet expected totalProfits 1750, got ${walletRes.data.data.totalProfits}`);
+  assert(walletRes.data.data.totalBalance === 21750, `Wallet expected totalBalance 21750, got ${walletRes.data.data.totalBalance}`);
+  console.log(`✅ Wallet summary metrics verified: totalDeposit=$${walletRes.data.data.totalDeposit}, totalProfits=$${walletRes.data.data.totalProfits}, totalBalance=$${walletRes.data.data.totalBalance}`);
+
+  const meRes = await request({
+    method: 'GET',
+    path: '/api/v1/auth/me',
+    token: userToken,
+  });
+  assert(meRes.status === 200, 'GET /auth/me failed');
+  assert(meRes.data.user.totalDeposit === 20000, `Me expected totalDeposit 20000, got ${meRes.data.user.totalDeposit}`);
+  assert(meRes.data.user.totalProfits === 1750, `Me expected totalProfits 1750, got ${meRes.data.user.totalProfits}`);
+  assert(meRes.data.user.totalBalance === 21750, `Me expected totalBalance 21750, got ${meRes.data.user.totalBalance}`);
+  console.log(`✅ Auth me metrics verified: totalDeposit=$${meRes.data.user.totalDeposit}, totalProfits=$${meRes.data.user.totalProfits}, totalBalance=$${meRes.data.user.totalBalance}`);
 
   // Test Dynamic Time-based Investment Progress (Liquidity Growth Matrix)
   console.log('\n7.1 Testing Dynamic Progress Calculation with Time Progression...');

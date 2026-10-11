@@ -1,4 +1,9 @@
 process.env.NODE_ENV = 'test';
+process.env.MONGOMS_MD5_CHECK = '0';
+process.env.MONGOMS_DISABLE_POSTINSTALL = '1';
+
+import dotenv from 'dotenv';
+dotenv.config();
 
 import http from 'http';
 import mongoose from 'mongoose';

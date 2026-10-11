@@ -1,12 +1,14 @@
 import { Router, Response } from 'express';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth';
 import { UserModel } from '../models';
+import { calculateUserFinancialSummary } from '../services/financialSummaryService';
 
 const router = Router();
 
 // GET /api/v1/user/profile
 router.get('/profile', authenticate, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
+    const summary = await calculateUserFinancialSummary(req.user!.userId);
     const user = await UserModel.findOne({ userId: req.user!.userId });
     if (!user) {
       res.status(404).json({ success: false, message: 'User not found' });
@@ -26,6 +28,17 @@ router.get('/profile', authenticate, async (req: AuthenticatedRequest, res: Resp
         sms: false,
         yieldAlerts: false,
       },
+      balance: summary.availableBalance,
+      availableBalance: summary.availableBalance,
+      totalDeposit: summary.totalDeposit,
+      totalDeposits: summary.totalDeposits,
+      totalProfits: summary.totalProfits,
+      totalProfit: summary.totalProfit,
+      totalBalance: summary.totalBalance,
+      totalAmount: summary.totalAmount,
+      totalEarnings: summary.totalProfits,
+      activeInvestments: summary.activeInvestments,
+      totalPortfolio: summary.totalPortfolio,
     });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message || 'Internal error fetching profile' });

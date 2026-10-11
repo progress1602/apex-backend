@@ -124,6 +124,7 @@ router.post('/login', async (req: Request, res: Response): Promise<void> => {
     }
 
     const token = generateToken(user);
+    const summary = await calculateUserFinancialSummary(user.userId);
 
     res.status(200).json({
       success: true,
@@ -135,7 +136,14 @@ router.post('/login', async (req: Request, res: Response): Promise<void> => {
         role: user.role,
         avatar: user.avatar || '',
         tier: user.tier,
-        balance: user.balance,
+        balance: summary.availableBalance,
+        availableBalance: summary.availableBalance,
+        totalDeposit: summary.totalDeposit,
+        totalDeposits: summary.totalDeposits,
+        totalProfits: summary.totalProfits,
+        totalProfit: summary.totalProfit,
+        totalBalance: summary.totalBalance,
+        totalAmount: summary.totalAmount,
       },
     });
   } catch (err: any) {
@@ -144,11 +152,12 @@ router.post('/login', async (req: Request, res: Response): Promise<void> => {
 });
 
 import { checkAndSettleMaturedInvestments } from '../services/settlementService';
+import { calculateUserFinancialSummary } from '../services/financialSummaryService';
 
 // GET /api/v1/auth/me
 router.get('/me', authenticate, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    await checkAndSettleMaturedInvestments(req.user!.userId);
+    const summary = await calculateUserFinancialSummary(req.user!.userId);
     const freshUser = (await UserModel.findOne({ userId: req.user!.userId })) || req.user!;
     res.status(200).json({
       success: true,
@@ -157,7 +166,14 @@ router.get('/me', authenticate, async (req: AuthenticatedRequest, res: Response)
         name: freshUser.name,
         email: freshUser.email,
         role: freshUser.role,
-        balance: Number(freshUser.balance.toFixed(2)),
+        balance: summary.availableBalance,
+        availableBalance: summary.availableBalance,
+        totalDeposit: summary.totalDeposit,
+        totalDeposits: summary.totalDeposits,
+        totalProfits: summary.totalProfits,
+        totalProfit: summary.totalProfit,
+        totalBalance: summary.totalBalance,
+        totalAmount: summary.totalAmount,
         tier: freshUser.tier,
       },
     });

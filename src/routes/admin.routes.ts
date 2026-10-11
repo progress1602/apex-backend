@@ -13,6 +13,7 @@ import {
 } from '../models';
 import { formatInvestmentResponse } from '../utils/investmentProgress';
 import { checkAndSettleMaturedInvestments } from '../services/settlementService';
+import { calculateUserFinancialSummary } from '../services/financialSummaryService';
 
 const router = Router();
 
@@ -20,23 +21,35 @@ const router = Router();
 router.get('/users', requireAdmin, async (_req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const users = await UserModel.find().sort({ createdAt: -1 });
-    const usersList = users.map((user) => ({
-      id: user.userId,
-      userId: user.userId,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      tier: user.tier,
-      balance: Number(user.balance.toFixed(2)),
-      phone: user.phone || '',
-      is2FAEnabled: user.is2FAEnabled,
-      currencyPreference: user.currencyPreference || 'USD',
-      notifications: user.notifications || { email: true, sms: false, yieldAlerts: false },
-      permissions: user.permissions || [],
-      passwordHash: user.passwordHash,
-      createdAt: user.createdAt.toISOString(),
-      updatedAt: user.updatedAt ? user.updatedAt.toISOString() : user.createdAt.toISOString(),
-    }));
+    const usersList = await Promise.all(
+      users.map(async (user) => {
+        const summary = await calculateUserFinancialSummary(user.userId);
+        return {
+          id: user.userId,
+          userId: user.userId,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          tier: user.tier,
+          balance: summary.availableBalance,
+          availableBalance: summary.availableBalance,
+          totalDeposit: summary.totalDeposit,
+          totalDeposits: summary.totalDeposits,
+          totalProfits: summary.totalProfits,
+          totalProfit: summary.totalProfit,
+          totalBalance: summary.totalBalance,
+          totalAmount: summary.totalAmount,
+          phone: user.phone || '',
+          is2FAEnabled: user.is2FAEnabled,
+          currencyPreference: user.currencyPreference || 'USD',
+          notifications: user.notifications || { email: true, sms: false, yieldAlerts: false },
+          permissions: user.permissions || [],
+          passwordHash: user.passwordHash,
+          createdAt: user.createdAt.toISOString(),
+          updatedAt: user.updatedAt ? user.updatedAt.toISOString() : user.createdAt.toISOString(),
+        };
+      })
+    );
 
     res.status(200).json({
       success: true,
@@ -66,7 +79,8 @@ router.get('/users/:identifier', requireAdmin, async (req: AuthenticatedRequest,
       return;
     }
 
-    const [deposits, withdrawals, investments, transactions] = await Promise.all([
+    const [summary, deposits, withdrawals, investments, transactions] = await Promise.all([
+      calculateUserFinancialSummary(user.userId),
       DepositModel.find({ userId: user.userId }).sort({ createdAt: -1 }),
       WithdrawalModel.find({ userId: user.userId }).sort({ createdAt: -1 }),
       InvestmentModel.find({ userId: user.userId }).sort({ createdAt: -1 }),
@@ -82,7 +96,14 @@ router.get('/users/:identifier', requireAdmin, async (req: AuthenticatedRequest,
         email: user.email,
         role: user.role,
         tier: user.tier,
-        balance: Number(user.balance.toFixed(2)),
+        balance: summary.availableBalance,
+        availableBalance: summary.availableBalance,
+        totalDeposit: summary.totalDeposit,
+        totalDeposits: summary.totalDeposits,
+        totalProfits: summary.totalProfits,
+        totalProfit: summary.totalProfit,
+        totalBalance: summary.totalBalance,
+        totalAmount: summary.totalAmount,
         phone: user.phone || '',
         is2FAEnabled: user.is2FAEnabled,
         currencyPreference: user.currencyPreference || 'USD',
@@ -97,6 +118,9 @@ router.get('/users/:identifier', requireAdmin, async (req: AuthenticatedRequest,
         totalWithdrawals: withdrawals.length,
         totalInvestments: investments.length,
         totalTransactions: transactions.length,
+        totalDepositAmount: summary.totalDeposit,
+        totalProfitsAmount: summary.totalProfits,
+        totalBalanceAmount: summary.totalBalance,
       },
       records: {
         deposits,

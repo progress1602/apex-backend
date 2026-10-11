@@ -9,6 +9,9 @@ export interface IUserDocument extends Document {
   tier: string;
   avatar: string;
   balance: number;
+  totalDeposit?: number;
+  totalProfits?: number;
+  totalBalance?: number;
   phone: string;
   is2FAEnabled: boolean;
   currencyPreference: string;
@@ -32,6 +35,9 @@ const UserSchema = new Schema<IUserDocument>(
     tier: { type: String, default: 'Tier 1 - Standard' },
     avatar: { type: String, default: '' },
     balance: { type: Number, default: 0.0 },
+    totalDeposit: { type: Number, default: 0.0 },
+    totalProfits: { type: Number, default: 0.0 },
+    totalBalance: { type: Number, default: 0.0 },
     phone: { type: String, default: '' },
     is2FAEnabled: { type: Boolean, default: false },
     currencyPreference: { type: String, default: 'USD' },

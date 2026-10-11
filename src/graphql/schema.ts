@@ -13,6 +13,12 @@ export const typeDefs = `#graphql
     tier: String
     avatar: String
     balance: Float
+    totalDeposit: Float
+    totalDeposits: Float
+    totalProfits: Float
+    totalProfit: Float
+    totalBalance: Float
+    totalAmount: Float
     phone: String
     is2FAEnabled: Boolean
     currencyPreference: String
@@ -34,6 +40,12 @@ export const typeDefs = `#graphql
     availableBalance: Float
     activeInvestments: Float
     totalEarnings: Float
+    totalDeposit: Float
+    totalDeposits: Float
+    totalProfits: Float
+    totalProfit: Float
+    totalBalance: Float
+    totalAmount: Float
     growth24h: Float
     currency: String
   }

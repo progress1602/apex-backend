@@ -18,6 +18,7 @@ import {
 } from '../config/platform';
 import { formatInvestmentResponse } from '../utils/investmentProgress';
 import { checkAndSettleMaturedInvestments, settleInvestmentById } from '../services/settlementService';
+import { calculateUserFinancialSummary } from '../services/financialSummaryService';
 
 export const resolvers = {
   User: {
@@ -28,6 +29,48 @@ export const resolvers = {
     tier: (parent: any) => parent.tier || 'Tier 1 - Standard',
     avatar: (parent: any) => parent.avatar || '',
     balance: (parent: any) => (typeof parent.balance === 'number' ? parent.balance : 0.0),
+    totalDeposit: async (parent: any) => {
+      if (typeof parent.totalDeposit === 'number') return parent.totalDeposit;
+      const uid = parent.userId || parent.id;
+      if (!uid) return 0.0;
+      const s = await calculateUserFinancialSummary(uid);
+      return s.totalDeposit;
+    },
+    totalDeposits: async (parent: any) => {
+      if (typeof parent.totalDeposits === 'number') return parent.totalDeposits;
+      const uid = parent.userId || parent.id;
+      if (!uid) return 0.0;
+      const s = await calculateUserFinancialSummary(uid);
+      return s.totalDeposit;
+    },
+    totalProfits: async (parent: any) => {
+      if (typeof parent.totalProfits === 'number') return parent.totalProfits;
+      const uid = parent.userId || parent.id;
+      if (!uid) return 0.0;
+      const s = await calculateUserFinancialSummary(uid);
+      return s.totalProfits;
+    },
+    totalProfit: async (parent: any) => {
+      if (typeof parent.totalProfit === 'number') return parent.totalProfit;
+      const uid = parent.userId || parent.id;
+      if (!uid) return 0.0;
+      const s = await calculateUserFinancialSummary(uid);
+      return s.totalProfits;
+    },
+    totalBalance: async (parent: any) => {
+      if (typeof parent.totalBalance === 'number') return parent.totalBalance;
+      const uid = parent.userId || parent.id;
+      if (!uid) return 0.0;
+      const s = await calculateUserFinancialSummary(uid);
+      return s.totalBalance;
+    },
+    totalAmount: async (parent: any) => {
+      if (typeof parent.totalAmount === 'number') return parent.totalAmount;
+      const uid = parent.userId || parent.id;
+      if (!uid) return 0.0;
+      const s = await calculateUserFinancialSummary(uid);
+      return s.totalBalance;
+    },
     phone: (parent: any) => parent.phone || '',
     is2FAEnabled: (parent: any) => Boolean(parent.is2FAEnabled),
     currencyPreference: (parent: any) => parent.currencyPreference || 'USD',
@@ -41,45 +84,53 @@ export const resolvers = {
   Query: {
     me: async (_: any, __: any, context: { user?: IUserDocument }) => {
       if (!context.user) throw new Error('Unauthorized: Missing or invalid token');
-      await checkAndSettleMaturedInvestments(context.user.userId);
+      const summary = await calculateUserFinancialSummary(context.user.userId);
       const freshUser = await UserModel.findOne({ userId: context.user.userId });
       if (!freshUser) throw new Error('Unauthorized: User not found in database');
-      return freshUser;
+      return {
+        ...freshUser.toObject(),
+        balance: summary.availableBalance,
+        totalDeposit: summary.totalDeposit,
+        totalDeposits: summary.totalDeposits,
+        totalProfits: summary.totalProfits,
+        totalProfit: summary.totalProfit,
+        totalBalance: summary.totalBalance,
+        totalAmount: summary.totalAmount,
+      };
     },
     userProfile: async (_: any, __: any, context: { user?: IUserDocument }) => {
       if (!context.user) throw new Error('Unauthorized: Missing or invalid token');
-      await checkAndSettleMaturedInvestments(context.user.userId);
+      const summary = await calculateUserFinancialSummary(context.user.userId);
       const freshUser = await UserModel.findOne({ userId: context.user.userId });
       if (!freshUser) throw new Error('Unauthorized: User not found in database');
-      return freshUser;
+      return {
+        ...freshUser.toObject(),
+        balance: summary.availableBalance,
+        totalDeposit: summary.totalDeposit,
+        totalDeposits: summary.totalDeposits,
+        totalProfits: summary.totalProfits,
+        totalProfit: summary.totalProfit,
+        totalBalance: summary.totalBalance,
+        totalAmount: summary.totalAmount,
+      };
     },
     walletSummary: async (_: any, __: any, context: { user?: IUserDocument }) => {
       if (!context.user) throw new Error('Unauthorized: Missing or invalid token');
-      await checkAndSettleMaturedInvestments(context.user.userId);
+      const summary = await calculateUserFinancialSummary(context.user.userId);
       const user = await UserModel.findOne({ userId: context.user.userId });
       if (!user) throw new Error('Unauthorized: User not found in database');
 
-      const investments = await InvestmentModel.find({ userId: user.userId });
-      let activeInvestmentsSum = 0;
-      let totalEarnings = 0;
-
-      for (const inv of investments) {
-        if (inv.status === 'active') {
-          activeInvestmentsSum += inv.amount;
-        }
-        if (inv.status === 'settled') {
-          totalEarnings += Math.max(0, inv.projectedReturn - inv.amount);
-        }
-      }
-
-      const availableBalance = user.balance;
-      const totalPortfolio = availableBalance + activeInvestmentsSum;
-
       return {
-        totalPortfolio: Number(totalPortfolio.toFixed(2)),
-        availableBalance: Number(availableBalance.toFixed(2)),
-        activeInvestments: Number(activeInvestmentsSum.toFixed(2)),
-        totalEarnings: Number(totalEarnings.toFixed(2)),
+        totalPortfolio: summary.totalPortfolio,
+        availableBalance: summary.availableBalance,
+        activeInvestments: summary.activeInvestments,
+        totalEarnings: summary.totalProfits,
+        totalDeposit: summary.totalDeposit,
+        totalDeposits: summary.totalDeposits,
+        totalProfits: summary.totalProfits,
+        totalProfit: summary.totalProfit,
+        totalBalance: summary.totalBalance,
+        totalAmount: summary.totalAmount,
         growth24h: 0.0,
         currency: user.currencyPreference || 'USD',
       };
