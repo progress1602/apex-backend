@@ -46,11 +46,16 @@ export async function connectDatabase(): Promise<typeof mongoose> {
   } else {
     try {
       await mongoose.connect(mongoUri, {
-        serverSelectionTimeoutMS: 10000,
+        serverSelectionTimeoutMS: 5000,
       });
     } catch (err: any) {
-      console.error('❌ FATAL: Could not connect to MongoDB Atlas with the provided MONGODB_URI.');
-      throw new Error(`MongoDB connection failed: ${err?.message || err}`);
+      if (isTest) {
+        console.warn('⚠️ MONGODB_URI connection failed in test environment. Falling back to isolated MongoMemoryServer for tests...');
+        await startEmbeddedMongo();
+      } else {
+        console.error('❌ FATAL: Could not connect to MongoDB Atlas with the provided MONGODB_URI.');
+        throw new Error(`MongoDB connection failed: ${err?.message || err}`);
+      }
     }
   }
 

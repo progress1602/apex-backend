@@ -30,42 +30,21 @@ export const resolvers = {
     avatar: (parent: any) => parent.avatar || '',
     balance: (parent: any) => (typeof parent.balance === 'number' ? parent.balance : 0.0),
     totalDeposit: async (parent: any) => {
-      if (typeof parent.totalDeposit === 'number') return parent.totalDeposit;
-      const uid = parent.userId || parent.id;
-      if (!uid) return 0.0;
-      const s = await calculateUserFinancialSummary(uid);
-      return s.totalDeposit;
-    },
-    totalDeposits: async (parent: any) => {
-      if (typeof parent.totalDeposits === 'number') return parent.totalDeposits;
+      if (parent._computedSummary) return parent._computedSummary.totalDeposit;
       const uid = parent.userId || parent.id;
       if (!uid) return 0.0;
       const s = await calculateUserFinancialSummary(uid);
       return s.totalDeposit;
     },
     totalProfits: async (parent: any) => {
-      if (typeof parent.totalProfits === 'number') return parent.totalProfits;
-      const uid = parent.userId || parent.id;
-      if (!uid) return 0.0;
-      const s = await calculateUserFinancialSummary(uid);
-      return s.totalProfits;
-    },
-    totalProfit: async (parent: any) => {
-      if (typeof parent.totalProfit === 'number') return parent.totalProfit;
+      if (parent._computedSummary) return parent._computedSummary.totalProfits;
       const uid = parent.userId || parent.id;
       if (!uid) return 0.0;
       const s = await calculateUserFinancialSummary(uid);
       return s.totalProfits;
     },
     totalBalance: async (parent: any) => {
-      if (typeof parent.totalBalance === 'number') return parent.totalBalance;
-      const uid = parent.userId || parent.id;
-      if (!uid) return 0.0;
-      const s = await calculateUserFinancialSummary(uid);
-      return s.totalBalance;
-    },
-    totalAmount: async (parent: any) => {
-      if (typeof parent.totalAmount === 'number') return parent.totalAmount;
+      if (parent._computedSummary) return parent._computedSummary.totalBalance;
       const uid = parent.userId || parent.id;
       if (!uid) return 0.0;
       const s = await calculateUserFinancialSummary(uid);
@@ -91,11 +70,9 @@ export const resolvers = {
         ...freshUser.toObject(),
         balance: summary.availableBalance,
         totalDeposit: summary.totalDeposit,
-        totalDeposits: summary.totalDeposits,
         totalProfits: summary.totalProfits,
-        totalProfit: summary.totalProfit,
         totalBalance: summary.totalBalance,
-        totalAmount: summary.totalAmount,
+        _computedSummary: summary,
       };
     },
     userProfile: async (_: any, __: any, context: { user?: IUserDocument }) => {
@@ -107,11 +84,9 @@ export const resolvers = {
         ...freshUser.toObject(),
         balance: summary.availableBalance,
         totalDeposit: summary.totalDeposit,
-        totalDeposits: summary.totalDeposits,
         totalProfits: summary.totalProfits,
-        totalProfit: summary.totalProfit,
         totalBalance: summary.totalBalance,
-        totalAmount: summary.totalAmount,
+        _computedSummary: summary,
       };
     },
     walletSummary: async (_: any, __: any, context: { user?: IUserDocument }) => {
@@ -126,11 +101,8 @@ export const resolvers = {
         activeInvestments: summary.activeInvestments,
         totalEarnings: summary.totalProfits,
         totalDeposit: summary.totalDeposit,
-        totalDeposits: summary.totalDeposits,
         totalProfits: summary.totalProfits,
-        totalProfit: summary.totalProfit,
         totalBalance: summary.totalBalance,
-        totalAmount: summary.totalAmount,
         growth24h: 0.0,
         currency: user.currencyPreference || 'USD',
       };
@@ -1117,28 +1089,26 @@ export const resolvers = {
         throw new Error('Forbidden: Admin access required');
       }
 
-      const inv = mongoose.isValidObjectId(investmentId)
+      let inv = mongoose.isValidObjectId(investmentId)
         ? await InvestmentModel.findOne({ $or: [{ investmentId }, { _id: investmentId }] })
         : await InvestmentModel.findOne({ investmentId });
 
       if (!inv) throw new Error('Investment position not found');
 
-      if (progress !== undefined) {
-        const numProg = Math.max(0, Math.min(100, Number(progress)));
-        inv.progress = numProg;
-        if (numProg >= 100 && inv.status === 'active') {
-          inv.status = 'completed';
+      if (status === 'settled' || (status === 'completed' && inv.status !== 'settled') || (progress !== undefined && Number(progress) >= 100)) {
+        await settleInvestmentById(inv.investmentId);
+        const updatedInv = await InvestmentModel.findOne({ investmentId: inv.investmentId });
+        if (updatedInv) inv = updatedInv;
+      } else {
+        if (progress !== undefined) {
+          const numProg = Math.max(0, Math.min(100, Number(progress)));
+          inv.progress = numProg;
         }
-      }
-
-      if (status !== undefined && ['active', 'completed', 'settled'].includes(status)) {
-        inv.status = status;
-        if (status === 'settled' || status === 'completed') {
-          inv.progress = 100;
+        if (status !== undefined && ['active', 'completed', 'settled'].includes(status)) {
+          inv.status = status;
         }
+        await inv.save();
       }
-
-      await inv.save();
 
       const user = await UserModel.findOne({ userId: inv.userId }, 'userId name email');
       const formatted = formatInvestmentResponse(inv);

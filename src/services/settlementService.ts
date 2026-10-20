@@ -121,14 +121,25 @@ export async function settleInvestmentById(investmentId: string): Promise<Settle
 export async function checkAndSettleMaturedInvestments(userId?: string): Promise<SettleResult[]> {
   try {
     const now = new Date();
-    const filter: any = {
-      maturityDate: { $lte: now },
-      status: { $ne: 'settled' },
-    };
+    const criteria: any[] = [
+      { maturityDate: { $lte: now }, status: { $ne: 'settled' } },
+      { status: 'completed' },
+      { progress: { $gte: 100 }, status: { $ne: 'settled' } },
+    ];
 
-    if (userId) {
-      filter.userId = userId;
-    }
+    const filter: any = userId
+      ? {
+          $and: [
+            { $or: criteria },
+            {
+              $or: [
+                { userId },
+                ...(mongoose.isValidObjectId(userId) ? [{ _id: userId }] : []),
+              ],
+            },
+          ],
+        }
+      : { $or: criteria };
 
     const maturedInvs = await InvestmentModel.find(filter);
     if (!maturedInvs || maturedInvs.length === 0) {

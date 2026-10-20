@@ -13,6 +13,7 @@ import { initializeApp } from '../src/app';
 import { stopEmbeddedMongo } from '../src/config/database';
 import { stopAutoSettlementWorker } from '../src/services/settlementService';
 import { UserModel, DepositModel, InvestmentModel, WithdrawalModel, TransactionModel, NotificationModel } from '../src/models';
+import { calculateUserFinancialSummary } from '../src/services/financialSummaryService';
 
 let server: http.Server;
 const PORT = 5098;
@@ -205,6 +206,12 @@ async function runTestSuite() {
   assert(mongoDepTx !== null, 'Transaction document not found in MongoDB');
   assert(mongoDepTx!.status === 'pending', 'Transaction status is pending');
   console.log(`✅ Deposit ${depositTxId} & transaction created in MongoDB`);
+
+  // Verify that pending deposit is NOT included in totalDeposit or totalBalance
+  const pendingSummary = await calculateUserFinancialSummary(testUserId);
+  assert(pendingSummary.totalDeposit === 0, `Pending deposit must NOT count toward totalDeposit. Got ${pendingSummary.totalDeposit}`);
+  assert(pendingSummary.totalBalance === 0, `Pending deposit must NOT count toward totalBalance. Got ${pendingSummary.totalBalance}`);
+  console.log(`✅ Pending deposit verified: totalDeposit=$${pendingSummary.totalDeposit}, totalBalance=$${pendingSummary.totalBalance}`);
 
   // Admin approves deposit
   console.log('Admin approving deposit...');
@@ -771,6 +778,42 @@ async function runTestSuite() {
   });
   assert(gqlLoginRes.status === 200 && gqlLoginRes.data.data.login.success === true, 'GraphQL login failed');
   assert(gqlLoginRes.data.data.login.user.email === testEmail, 'GraphQL login user email mismatch');
+
+  // Verify GraphQL me and walletSummary financial metrics
+  const freshGqlToken = gqlLoginRes.data.data.login.token;
+  const gqlFinancialRes = await request({
+    method: 'POST',
+    path: '/graphql',
+    token: freshGqlToken,
+    body: {
+      query: `
+        query GetMeAndWallet {
+          me {
+            id
+            email
+            balance
+            totalDeposit
+            totalProfits
+            totalBalance
+          }
+          walletSummary {
+            availableBalance
+            totalDeposit
+            totalProfits
+            totalBalance
+          }
+        }
+      `,
+    },
+  });
+  assert(gqlFinancialRes.status === 200 && !gqlFinancialRes.data.errors, `GraphQL GetMeAndWallet failed: ${JSON.stringify(gqlFinancialRes.data.errors)}`);
+  const gqlMe = gqlFinancialRes.data.data.me;
+  const gqlWallet = gqlFinancialRes.data.data.walletSummary;
+  assert(gqlMe.totalDeposit > 0, 'GraphQL me.totalDeposit > 0');
+  assert(gqlMe.totalBalance === gqlMe.totalDeposit + gqlMe.totalProfits, 'GraphQL me.totalBalance === totalDeposit + totalProfits');
+  assert(gqlWallet.totalDeposit === gqlMe.totalDeposit, 'GraphQL walletSummary.totalDeposit matches me.totalDeposit');
+  assert(gqlWallet.totalBalance === gqlMe.totalBalance, 'GraphQL walletSummary.totalBalance matches me.totalBalance');
+  console.log(`✅ GraphQL financial queries verified: me.totalDeposit=$${gqlMe.totalDeposit}, me.totalProfits=$${gqlMe.totalProfits}, me.totalBalance=$${gqlMe.totalBalance}`);
 
   // Test GraphQL adminSearchNotificationRecipients
   const gqlSearchRecipients = await request({

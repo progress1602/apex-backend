@@ -12,7 +12,7 @@ import {
   PlanModel,
 } from '../models';
 import { formatInvestmentResponse } from '../utils/investmentProgress';
-import { checkAndSettleMaturedInvestments } from '../services/settlementService';
+import { checkAndSettleMaturedInvestments, settleInvestmentById } from '../services/settlementService';
 import { calculateUserFinancialSummary } from '../services/financialSummaryService';
 
 const router = Router();
@@ -737,27 +737,25 @@ router.patch('/investments/:id/progress', requireAdmin, async (req: Authenticate
       return;
     }
 
-    if (progress !== undefined) {
-      const numProg = Math.max(0, Math.min(100, Number(progress)));
-      inv.progress = numProg;
-      if (numProg >= 100 && inv.status === 'active') {
-        inv.status = 'completed';
+    let finalInv = inv;
+    if (status === 'settled' || (status === 'completed' && inv.status !== 'settled') || (progress !== undefined && Number(progress) >= 100)) {
+      await settleInvestmentById(inv.investmentId);
+      const updatedInv = await InvestmentModel.findOne({ investmentId: inv.investmentId });
+      if (updatedInv) finalInv = updatedInv;
+    } else {
+      if (progress !== undefined) {
+        finalInv.progress = Math.max(0, Math.min(100, Number(progress)));
       }
-    }
-
-    if (status !== undefined && ['active', 'completed', 'settled'].includes(status)) {
-      inv.status = status;
-      if (status === 'settled' || status === 'completed') {
-        inv.progress = 100;
+      if (status !== undefined && ['active', 'completed', 'settled'].includes(status)) {
+        finalInv.status = status;
       }
+      await finalInv.save();
     }
-
-    await inv.save();
 
     res.status(200).json({
       success: true,
       message: 'Investment progress updated successfully in MongoDB',
-      investment: formatInvestmentResponse(inv),
+      investment: formatInvestmentResponse(finalInv),
     });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message || 'Internal error updating investment progress' });
