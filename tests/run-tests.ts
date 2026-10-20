@@ -298,6 +298,42 @@ async function runTestSuite() {
   assert(meRes.data.user.totalBalance === 21750, `Me expected totalBalance 21750, got ${meRes.data.user.totalBalance}`);
   console.log(`✅ Auth me metrics verified: totalDeposit=$${meRes.data.user.totalDeposit}, totalProfits=$${meRes.data.user.totalProfits}, totalBalance=$${meRes.data.user.totalBalance}`);
 
+  // Test: Adding another deposit must NOT update or alter totalProfits
+  console.log('\n7.0.1 Testing that User Deposits do NOT update totalProfits...');
+  const secondDepRes = await request({
+    method: 'POST',
+    path: '/api/v1/deposits',
+    token: userToken,
+    body: {
+      amount: 15000.0,
+      method: 'usdt',
+      transactionHash: '0xseconddeposit999',
+    },
+  });
+  assert(secondDepRes.status === 201, 'Second deposit creation failed');
+  const secondDepTxId = secondDepRes.data.transaction.id;
+
+  // Before approval: profits must still be 1750, totalDeposit 20000
+  const summaryBeforeApprove = await calculateUserFinancialSummary(testUserId);
+  assert(summaryBeforeApprove.totalProfits === 1750, `Profits changed on pending deposit: ${summaryBeforeApprove.totalProfits}`);
+  assert(summaryBeforeApprove.totalDeposit === 20000, `totalDeposit changed on pending deposit: ${summaryBeforeApprove.totalDeposit}`);
+
+  // Approve the second deposit ($15,000)
+  const approveSecondRes = await request({
+    method: 'PATCH',
+    path: `/api/v1/admin/deposits/${secondDepTxId}/status`,
+    body: { status: 'approved' },
+  });
+  assert(approveSecondRes.status === 200, 'Second deposit approval failed');
+
+  // After approval: totalDeposit is now 35000, but totalProfits MUST STILL BE 1750
+  const summaryAfterApprove = await calculateUserFinancialSummary(testUserId);
+  assert(summaryAfterApprove.totalDeposit === 35000, `Expected totalDeposit 35000, got ${summaryAfterApprove.totalDeposit}`);
+  assert(summaryAfterApprove.totalProfits === 1750, `CRITICAL ERROR: totalProfits was affected by deposit! Expected 1750, got ${summaryAfterApprove.totalProfits}`);
+  assert(summaryAfterApprove.totalBalance === 36750, `Expected totalBalance 36750, got ${summaryAfterApprove.totalBalance}`);
+  assert(summaryAfterApprove.totalBalance === summaryAfterApprove.totalDeposit + summaryAfterApprove.totalProfits, 'totalBalance must strictly equal totalDeposit + totalProfits');
+  console.log(`✅ Deposits do NOT affect totalProfits: totalDeposit increased to $${summaryAfterApprove.totalDeposit}, totalProfits remained strictly $${summaryAfterApprove.totalProfits}`);
+
   // Test Dynamic Time-based Investment Progress (Liquidity Growth Matrix)
   console.log('\n7.1 Testing Dynamic Progress Calculation with Time Progression...');
   const inv2Res = await request({
